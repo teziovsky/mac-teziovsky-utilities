@@ -66,8 +66,9 @@ struct DroneModeView: View {
                     } label: {
                         Label("Undo Last Step", systemImage: "arrow.uturn.backward")
                     }
-                    .help("Revert the last finalize step: restore trashed files and undo renames (⌘Z)")
-                    .keyboardShortcut("z", modifiers: .command)
+                    .help("Revert the last finalize step: restore trashed files and undo renames (⌥⌘Z)")
+                    // Not ⌘Z: that belongs to Edit → Undo, which text fields also use.
+                    .keyboardShortcut("z", modifiers: [.command, .option])
                     .disabled(isBusy)
                 }
             }

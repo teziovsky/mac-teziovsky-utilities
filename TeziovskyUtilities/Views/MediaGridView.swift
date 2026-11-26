@@ -52,6 +52,10 @@ struct MediaGridView: View {
                             onSelect: { itemID in
                                 appState.selectedMediaID = itemID
                                 isGridFocused = true
+                            },
+                            onOpen: { itemID in
+                                appState.selectedMediaID = itemID
+                                Task { await appState.previewSelectedMedia() }
                             }
                         )
                         .animation(.smooth(duration: 0.35), value: appState.thumbnailDisplayMode)
@@ -77,6 +81,15 @@ struct MediaGridView: View {
                     }
                     .onKeyPress(.escape) {
                         appState.photosEscapeBack()
+                        return .handled
+                    }
+                    .onKeyPress(.space) {
+                        // Space toggles Quick Look, as in Finder and Photos.
+                        if QuickLookHelper.isPanelVisible {
+                            QuickLookHelper.closePreview()
+                        } else {
+                            Task { await appState.previewSelectedMedia() }
+                        }
                         return .handled
                     }
                     .onChange(of: appState.selectedMediaID) { _, newID in
@@ -259,6 +272,7 @@ private struct SmoothMediaGrid: View, Animatable {
     let displayMode: ThumbnailDisplayMode
     let assetForItem: (MediaItem) -> PHAsset?
     let onSelect: (String) -> Void
+    let onOpen: (String) -> Void
 
     var animatableData: CGFloat {
         get { columnCount }
@@ -304,6 +318,8 @@ private struct SmoothMediaGrid: View, Animatable {
                             )
                         }
                         .buttonStyle(.plain)
+                        // Simultaneous, so the first click still selects immediately.
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen(item.id) })
                         .id(item.id)
                     }
 

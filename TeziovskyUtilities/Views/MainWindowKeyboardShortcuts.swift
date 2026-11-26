@@ -21,10 +21,16 @@ struct MainWindowKeyboardShortcuts: View {
             }
             .keyboardShortcut("y", modifiers: .command)
 
-            shortcutButton("Larger thumbnails", enabled: appState.selectedAlbum != nil && appState.canDecreaseMediaGridColumnCount) {
+            shortcutButton("Larger thumbnails", enabled: canEnlarge) {
                 appState.decreaseMediaGridColumnCount()
             }
             .keyboardShortcut("+", modifiers: .command)
+
+            // ⌘= is what most keyboards send for "zoom in" without Shift.
+            shortcutButton("Larger thumbnails", enabled: canEnlarge) {
+                appState.decreaseMediaGridColumnCount()
+            }
+            .keyboardShortcut("=", modifiers: .command)
 
             shortcutButton("Smaller thumbnails", enabled: appState.selectedAlbum != nil && appState.canIncreaseMediaGridColumnCount) {
                 appState.increaseMediaGridColumnCount()
@@ -45,12 +51,11 @@ struct MainWindowKeyboardShortcuts: View {
                 appState.promptExportDirectoryAndOrganize()
             }
             .keyboardShortcut("e", modifiers: .command)
-
-            shortcutButton("Toggle sidebar", enabled: true) {
-                appState.toggleSidebarVisibility()
-            }
-            .keyboardShortcut("s", modifiers: .command)
         }
+    }
+
+    private var canEnlarge: Bool {
+        appState.selectedAlbum != nil && appState.canDecreaseMediaGridColumnCount
     }
 
     private func shortcutButton(

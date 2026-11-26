@@ -18,7 +18,8 @@ Native macOS app for organizing media. From a home screen you pick a workflow:
 - Files are written byte-for-byte as stored in Photos (no re-encoding, no metadata rewrite); only Finder Created/Modified are set, from the file's own EXIF capture time
 - Edited photos export their edited render by default; turn this off in Settings → Photos to export unmodified originals
 - Live Photo motion (`.MOV`) and RAW alternates are saved next to the photo with the same base name (Settings → Photos)
-- Quick Look preview for the selected item (⌘Y)
+- Quick Look preview for the selected item (Space toggles it, ⌘Y, or double-click)
+- Videos show their duration; the sidebar toggles with ⌃⌘S and thumbnails resize with ⌘+/⌘= and ⌘−
 
 ### Organize Drone Footage
 
@@ -28,7 +29,7 @@ Point the app at a project folder that contains a `raw/` and an `export/` subfol
 2. Move the remaining images and videos from `export/` up into the project folder (keeping `vertical/` / `horizontal/` unless disabled in Settings).
 3. Move `export/` to the Trash once it is empty, and `raw/` only if "Keep raw/ after finalize" is off (it is kept by default). Files that are not part of the delivery (e.g. `.drp`, `.srt`, naming conflicts) are listed in the preview and left in `export/`, which is then kept.
 
-A preview lists every planned action before anything is changed, destructive steps ask for confirmation, and each step can be reverted with **Undo Last Step** (⌘Z). Esc and Go Back only navigate; they never change files.
+A preview lists every planned action before anything is changed, destructive steps ask for confirmation, and each step can be reverted with **Undo Last Step** (⌥⌘Z). Esc and Go Back only navigate; they never change files.
 
 Compression runs HandBrakeCLI with per-file progress and ETA. Output is written to a hidden `.partial` file and only renamed after HandBrakeCLI succeeds, so a failed, cancelled or interrupted encode never looks like a finished compressed copy. Cancel stops the running encode, and the Mac is kept awake while compressing.
 

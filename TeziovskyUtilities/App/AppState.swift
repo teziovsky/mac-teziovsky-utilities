@@ -33,6 +33,18 @@ final class AppState: ObservableObject {
     @Published var mediaGridColumnCount = AppSettings.mediaGridColumnCount
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
 
+    var photosCommands: PhotosCommandState {
+        PhotosCommandState(
+            route: route,
+            hasSelectedAlbum: selectedAlbum != nil,
+            hasSelectedMedia: selectedMediaID != nil,
+            hasMedia: !mediaItems.isEmpty,
+            canOrganizeSelectedAlbum: canOrganizeSelectedAlbum,
+            isOrganizing: organizeExporter.isRunning,
+            isLoadingAlbums: photosService.isLoadingAlbums
+        )
+    }
+
     var selectableAlbums: [PhotoAlbum] {
         photosService.albums.filter { !omittedFromOrganizeAlbumIDs.contains($0.id) }
     }

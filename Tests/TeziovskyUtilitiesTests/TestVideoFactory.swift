@@ -128,7 +128,17 @@ enum TestVideoFactory {
             sampleSizeArray: &sizes,
             sampleBufferOut: &copy
         )
-        return try XCTUnwrap(copy)
+        let result = try XCTUnwrap(copy)
+        // Keep "not a sync sample" flags, as a real recording has them; without them every frame
+        // counts as a keyframe and decoding from any point but the start fails.
+        if let source = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [NSDictionary],
+           let target = CMSampleBufferGetSampleAttachmentsArray(result, createIfNecessary: true) {
+            for (index, attachments) in source.enumerated() where index < CFArrayGetCount(target) {
+                let entry = unsafeBitCast(CFArrayGetValueAtIndex(target, index), to: NSMutableDictionary.self)
+                entry.addEntries(from: attachments as? [AnyHashable: Any] ?? [:])
+            }
+        }
+        return result
     }
 
     private static func makePCMAudioInput() -> AVAssetWriterInput {

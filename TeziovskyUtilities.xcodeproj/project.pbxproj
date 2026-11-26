@@ -73,6 +73,7 @@
 		873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */; };
 		A00300000000000000000001 /* LocalMediaConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000001 /* LocalMediaConversion.swift */; };
 		A00300000000000000000099 /* HEVCRetagger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000099 /* HEVCRetagger.swift */; };
+		A003000000000000000000A0 /* LocalMediaRemuxVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */; };
 		0FF1B5869E37421096AD477E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CCEC6AF34D2A457CA48F3ED4 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -147,6 +148,7 @@
 		7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaListComponents.swift; sourceTree = "<group>"; };
 		B00300000000000000000001 /* LocalMediaConversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaConversion.swift; sourceTree = "<group>"; };
 		B00300000000000000000099 /* HEVCRetagger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCRetagger.swift; sourceTree = "<group>"; };
+		B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaRemuxVerifier.swift; sourceTree = "<group>"; };
 		334455667788990011223344 /* TeziovskyUtilities.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TeziovskyUtilities.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -218,6 +220,7 @@
 				B00200000000000000000002 /* FileDateRepairService.swift */,
 				B00300000000000000000001 /* LocalMediaConversion.swift */,
 				B00300000000000000000099 /* HEVCRetagger.swift */,
+				B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -429,6 +432,7 @@
 				873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */,
 				A00300000000000000000001 /* LocalMediaConversion.swift in Sources */,
 				A00300000000000000000099 /* HEVCRetagger.swift in Sources */,
+				A003000000000000000000A0 /* LocalMediaRemuxVerifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

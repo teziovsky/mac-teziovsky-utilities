@@ -388,7 +388,7 @@ enum LocalMediaConverter {
     ) async throws {
         let asset = AVURLAsset(url: sourceURL)
         let outputType: AVFileType = container == .mp4 ? .mp4 : .mov
-        if try await videoSubtype(of: asset) == HEVCRetagger.hev1CodecType {
+        if try await LocalMediaRemuxVerifier.videoSubtype(of: asset) == HEVCRetagger.hev1CodecType {
             // Passthrough export would keep the undecodable `hev1` tag.
             try await HEVCRetagger.rewrap(sourceURL, to: destinationURL, fileType: outputType)
             return
@@ -404,32 +404,6 @@ enum LocalMediaConverter {
         session.shouldOptimizeForNetworkUse = container == .mp4
         session.metadata = (try? await asset.load(.metadata)) ?? []
         try await runExport(session)
-    }
-
-    private static func videoSubtype(of asset: AVAsset) async throws -> FourCharCode? {
-        guard let track = try await asset.loadTracks(withMediaType: .video).first,
-              let description = try await track.load(.formatDescriptions).first else { return nil }
-        return CMFormatDescriptionGetMediaSubType(description)
-    }
-
-    /// A rewrapped file must play and keep the source's video codec (`hev1` → `hvc1`) and duration.
-    private static func verifyRemux(_ url: URL, source: URL) async throws {
-        let output = AVURLAsset(url: url)
-        let original = AVURLAsset(url: source)
-        guard try await output.load(.isPlayable),
-              let outputCodec = try await videoSubtype(of: output),
-              var sourceCodec = try await videoSubtype(of: original) else {
-            throw LocalMediaConversionError.verificationFailed
-        }
-        if sourceCodec == HEVCRetagger.hev1CodecType { sourceCodec = kCMVideoCodecType_HEVC }
-        guard outputCodec == sourceCodec else {
-            throw LocalMediaConversionError.verificationFailed
-        }
-        let outputDuration = try await output.load(.duration).seconds
-        let sourceDuration = try await original.load(.duration).seconds
-        guard abs(outputDuration - sourceDuration) <= max(0.5, sourceDuration * 0.01) else {
-            throw LocalMediaConversionError.verificationFailed
-        }
     }
 
     private static func runExport(_ session: AVAssetExportSession) async throws {
@@ -465,7 +439,7 @@ enum LocalMediaConverter {
                 throw LocalMediaConversionError.verificationFailed
             }
         case .remuxVideo:
-            try await verifyRemux(url, source: source)
+            try await LocalMediaRemuxVerifier.verify(url, source: source)
         case .legacyVideo(_, let expectedCodec):
             let asset = AVURLAsset(url: url)
             guard try await asset.load(.isPlayable),

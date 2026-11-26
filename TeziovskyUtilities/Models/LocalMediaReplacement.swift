@@ -22,11 +22,14 @@ struct LocalMediaReplaceablePair: Identifiable, Sendable, Equatable {
     ) -> LocalMediaReplaceablePair? {
         guard let twinName = LocalMediaConverter.convertedTwinName(of: originalURL),
               !twinName.isEmpty,
-              twinName != originalURL.lastPathComponent,
+              twinName != ".", twinName != "..",
               !twinName.contains("/") else { return nil }
         let copyURL = originalURL.deletingLastPathComponent().appendingPathComponent(twinName)
         var info = stat()
-        guard lstat(copyURL.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        var originalInfo = stat()
+        guard lstat(copyURL.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              lstat(originalURL.path, &originalInfo) == 0,
+              info.st_dev != originalInfo.st_dev || info.st_ino != originalInfo.st_ino else { return nil }
         let relativeDirectory = (relativePath as NSString).deletingLastPathComponent
         let copyRelativePath = relativeDirectory.isEmpty ? twinName : relativeDirectory + "/" + twinName
         let baseName = originalURL.deletingPathExtension().lastPathComponent
@@ -41,7 +44,13 @@ struct LocalMediaReplaceablePair: Identifiable, Sendable, Equatable {
         )
     }
 
+    /// Sorted pairs without chains: a file that is both a copy and an original (A to B to C,
+    /// or A and B pointing at each other) takes both of its links out, so it is never replaced.
     static func sorted(_ pairs: [LocalMediaReplaceablePair]) -> [LocalMediaReplaceablePair] {
-        pairs.sorted { $0.originalRelativePath.localizedStandardCompare($1.originalRelativePath) == .orderedAscending }
+        let originals = Set(pairs.map(\.originalRelativePath))
+        let copies = Set(pairs.map(\.copyRelativePath))
+        return pairs.filter {
+            !copies.contains($0.originalRelativePath) && !originals.contains($0.copyRelativePath)
+        }.sorted { $0.originalRelativePath.localizedStandardCompare($1.originalRelativePath) == .orderedAscending }
     }
 }

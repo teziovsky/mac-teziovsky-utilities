@@ -84,4 +84,67 @@ final class LocalMediaReplacementTests: XCTestCase {
 
         XCTAssertTrue(pairs.isEmpty)
     }
+
+    func testChainIsNotReplaceable() async throws {
+        _ = try write("A.mp4", marker: "B.mp4")
+        _ = try write("B.mp4", marker: "C.mp4")
+        _ = try write("C.mp4")
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertTrue(pairs.isEmpty)
+    }
+
+    func testCycleIsNotReplaceable() async throws {
+        _ = try write("A.mp4", marker: "B.mp4")
+        _ = try write("B.mp4", marker: "A.mp4")
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertTrue(pairs.isEmpty)
+    }
+
+    func testChainDoesNotHideAnUnrelatedPair() async throws {
+        _ = try write("A.mp4", marker: "B.mp4")
+        _ = try write("B.mp4", marker: "C.mp4")
+        _ = try write("C.mp4")
+        _ = try write("X.mp4", marker: "Y.mp4")
+        _ = try write("Y.mp4")
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertEqual(pairs.map(\.originalRelativePath), ["X.mp4"])
+    }
+
+    func testCaseVariantOfTheSameFileIsNotAPair() async throws {
+        let original = try write("Mia.mp4")
+        let probe = root.appendingPathComponent("mia.MP4")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: probe.path), "case-sensitive volume")
+        LocalMediaConverter.markConverted(original, destination: probe)
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertTrue(pairs.isEmpty)
+    }
+
+    func testUnsafeTwinNamesAreNotPairs() async throws {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("dir.mp4"),
+            withIntermediateDirectories: true
+        )
+        _ = try write("Real.mp4")
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("Link.mp4"),
+            withDestinationURL: root.appendingPathComponent("Real.mp4")
+        )
+        _ = try write("S.mp4", marker: "sub/Real.mp4")
+        _ = try write("P.mp4", marker: "../Real.mp4")
+        _ = try write("D.mp4", marker: "..")
+        _ = try write("Holder.mp4", marker: "dir.mp4")
+        _ = try write("L.mp4", marker: "Link.mp4")
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertTrue(pairs.isEmpty)
+    }
 }

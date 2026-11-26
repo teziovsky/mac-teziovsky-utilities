@@ -221,7 +221,38 @@ enum FileDateRepairPlanner {
     private static func isPlausible(_ date: Date, now: Date) -> Bool {
         let calendar = Calendar(identifier: .gregorian)
         let minimum = calendar.date(from: DateComponents(year: 1900, month: 1, day: 1)) ?? .distantPast
-        return date >= minimum && date <= now.addingTimeInterval(24 * 60 * 60)
+        return date >= minimum && date <= now.addingTimeInterval(24 * 60 * 60) && !isSentinel(date)
+    }
+
+    /// Epoch days written by zeroed fields or reset clocks: QuickTime/HFS (1904), Unix (1970)
+    /// and FAT (1980). Matched within ±14 h so the local-midnight form in any zone is covered.
+    private static let epochDays: [Date] = [1904, 1970, 1980].compactMap { utcDate(year: $0, month: 1, day: 1) }
+
+    /// Camera and framework defaults that are only suspicious at exactly midnight on 1 January.
+    private static let defaultMidnightYears: Set<Int> = [2000, 2001]
+
+    /// True for placeholder timestamps that must never win the "oldest date" vote.
+    static func isSentinel(_ date: Date) -> Bool {
+        if epochDays.contains(where: { abs(date.timeIntervalSince($0)) <= 14 * 60 * 60 }) {
+            return true
+        }
+        for zone in [TimeZone.current, TimeZone(secondsFromGMT: 0)!] {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone
+            let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+            let isNewYearMidnight = parts.month == 1 && parts.day == 1
+                && parts.hour == 0 && parts.minute == 0 && parts.second == 0
+            if isNewYearMidnight, let year = parts.year, defaultMidnightYears.contains(year) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func utcDate(year: Int, month: Int, day: Int) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
     }
 
     private static func evidenceSort(_ lhs: FileDateEvidence, _ rhs: FileDateEvidence) -> Bool {

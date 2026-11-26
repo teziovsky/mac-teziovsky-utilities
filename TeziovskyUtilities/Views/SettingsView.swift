@@ -408,6 +408,8 @@ private struct PhotosSettingsTab: View {
     @Binding var excludedSuffix: String
     @Binding var omittedAlbumIDs: Set<String>
     @Binding var organizeByYearEnabled: Bool
+    @AppStorage(AppSettings.photosExportEditedVersionsKey) private var exportEditedVersions = true
+    @AppStorage(AppSettings.photosExportCompanionFilesKey) private var exportCompanionFiles = true
 
     private var sortedAlbums: [PhotoAlbum] {
         appState.photosService.albums.sorted {
@@ -428,6 +430,19 @@ private struct PhotosSettingsTab: View {
                         + "If the export folder name already contains a year (e.g. 2026 or 2026_10_test), "
                         + "all items go directly into that folder. "
                         + "When off, everything exports flat into the chosen folder."
+                )
+                .font(AlbumListRowStyle.detailFont)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("Exported files") {
+                Toggle("Export edited versions when available", isOn: $exportEditedVersions)
+                    .help("When off, the unmodified original is exported even if the photo was edited.")
+                Toggle("Include Live Photo videos and RAW originals", isOn: $exportCompanionFiles)
+                    .help("Saved next to the photo with the same name, e.g. IMG_0001.HEIC + IMG_0001.MOV.")
+                Text(
+                    "Files are written exactly as stored in Photos; only Finder Created and Modified "
+                        + "dates are set."
                 )
                 .font(AlbumListRowStyle.detailFont)
                 .foregroundStyle(.secondary)

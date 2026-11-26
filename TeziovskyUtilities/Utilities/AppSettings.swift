@@ -11,6 +11,8 @@ enum AppSettings {
     private static let exportDirectoryBookmarkKey = "exportDirectoryBookmark"
     private static let exportDirectoryPathKey = "exportDirectoryPath"
     private static let organizeByYearEnabledKey = "organizeByYearEnabled"
+    static let photosExportEditedVersionsKey = "photosExportEditedVersions"
+    static let photosExportCompanionFilesKey = "photosExportCompanionFiles"
     private static let droneCompressedSuffixKey = "droneCompressedSuffix"
     private static let droneRawDirectoryNameKey = "droneRawDirectoryName"
     private static let droneExportDirectoryNameKey = "droneExportDirectoryName"
@@ -85,6 +87,23 @@ enum AppSettings {
     static var organizeByYearEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: organizeByYearEnabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: organizeByYearEnabledKey) }
+    }
+
+    /// When true (the historical behaviour), edited photos export their edited render;
+    /// when false, the unmodified original is exported.
+    static var photosExportEditedVersions: Bool {
+        get { bool(forKey: photosExportEditedVersionsKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: photosExportEditedVersionsKey) }
+    }
+
+    /// Exports Live Photo motion and RAW alternates next to the primary file.
+    static var photosExportCompanionFiles: Bool {
+        get { bool(forKey: photosExportCompanionFilesKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: photosExportCompanionFilesKey) }
+    }
+
+    private static func bool(forKey key: String, default defaultValue: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) == nil ? defaultValue : UserDefaults.standard.bool(forKey: key)
     }
 
     // MARK: - Drone finalize

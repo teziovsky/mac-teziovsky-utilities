@@ -99,6 +99,11 @@ final class OrganizeExporter: ObservableObject {
         let fileManager = FileManager.default
         try? fileManager.createDirectory(at: scopedDirectory, withIntermediateDirectories: true)
 
+        // Captured once so a Settings change mid-run cannot mix export styles in one album.
+        let options = ExportOptions(
+            preferEdited: AppSettings.photosExportEditedVersions,
+            includeCompanions: AppSettings.photosExportCompanionFiles
+        )
         var failedCount = 0
         var skippedCount = 0
         var movedCount = 0
@@ -148,7 +153,7 @@ final class OrganizeExporter: ObservableObject {
             }
 
             do {
-                try await exportAsset(asset, to: destination)
+                try await exportAsset(asset, to: destination, options: options)
                 try await photosService.moveAsset(
                     asset,
                     fromSourceAlbum: sourceAlbum,
@@ -223,12 +228,13 @@ final class OrganizeExporter: ObservableObject {
         sleepAssertion.release()
     }
 
-    private func exportAsset(_ asset: PHAsset, to destination: URL) async throws {
+    private func exportAsset(_ asset: PHAsset, to destination: URL, options: ExportOptions) async throws {
         do {
-            try await PhotoAssetExporter.writeOriginalResource(
+            try await PhotoAssetExporter.writeResources(
                 for: asset,
                 to: destination,
-                skipWriteIfFileExists: true
+                preferEdited: options.preferEdited,
+                includeCompanions: options.includeCompanions
             )
         } catch let error as PhotoAssetExportError {
             switch error {
@@ -268,6 +274,11 @@ final class OrganizeExporter: ObservableObject {
     private func fileManagerExists(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path)
     }
+}
+
+private struct ExportOptions {
+    let preferEdited: Bool
+    let includeCompanions: Bool
 }
 
 private enum OrganizeExportError: LocalizedError {

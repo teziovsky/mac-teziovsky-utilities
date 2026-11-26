@@ -4,18 +4,13 @@ import ImageIO
 import Photos
 
 enum FileDatePreservation {
-    /// Applies Photos / EXIF dates to every layer Finder uses for "Created" (filesystem birth time).
-    static func apply(from asset: PHAsset, to url: URL) throws {
-        let created = canonicalCreationDate(for: asset, fileURL: url)
-        let modified = asset.modificationDate ?? created
-        try applyFileDates(to: url, created: created, modified: modified)
-    }
-
-    static func canonicalCreationDate(for asset: PHAsset, fileURL: URL) -> Date {
+    /// The capture time Finder "Created" should show: the file's own EXIF date (offset-aware)
+    /// when present, otherwise the Photos library date.
+    static func canonicalCreationDate(fallback: Date?, fileURL: URL) -> Date {
         if let exifDate = readExifOriginalDate(from: fileURL) {
             return exifDate
         }
-        return asset.creationDate ?? asset.modificationDate ?? Date()
+        return fallback ?? Date()
     }
 
     /// Copies the source file's creation (birth) and modification dates onto the destination file.

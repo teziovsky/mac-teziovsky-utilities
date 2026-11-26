@@ -141,6 +141,8 @@ enum ExternalDriveClassifier {
         let note: String?
     }
 
+    static let notInYearFolderReason = "Not inside a year folder (choose a folder above the year folders)"
+
     private static func classify(_ output: FileDateScanOutput) -> Verdict {
         if let failure = output.failure {
             return Verdict(bucket: .needsOrganizing, reason: failure.message, note: nil)
@@ -164,6 +166,11 @@ enum ExternalDriveClassifier {
         }
         if !output.hasUsableDate {
             return Verdict(bucket: .needsOrganizing, reason: "No usable date", note: nil)
+        }
+        // A file above the year folders would land on the drive outside any year folder.
+        let folders = (output.relativePath as NSString).deletingLastPathComponent.split(separator: "/")
+        guard folders.contains(where: { LocalMediaOrganizationPlanner.isYearDirectory(String($0)) }) else {
+            return Verdict(bucket: .needsOrganizing, reason: notInYearFolderReason, note: nil)
         }
         let notes = output.notices.map(\.message)
         return Verdict(bucket: .ready, reason: nil, note: notes.isEmpty ? nil : notes.joined(separator: "\n"))

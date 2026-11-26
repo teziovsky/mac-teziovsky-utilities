@@ -512,7 +512,7 @@ enum LocalMediaOrganizationPlanner {
     }
 
     /// Four ASCII digits forming a plausible photo year; `0815` or `9999` are ordinary folders.
-    private static func isYearDirectory(_ name: String) -> Bool {
+    static func isYearDirectory(_ name: String) -> Bool {
         guard name.count == 4, name.allSatisfy({ $0.isASCII && $0.isNumber }), let year = Int(name) else {
             return false
         }

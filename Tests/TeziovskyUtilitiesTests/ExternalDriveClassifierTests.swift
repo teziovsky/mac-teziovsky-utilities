@@ -101,55 +101,74 @@ final class ExternalDriveClassifierTests: XCTestCase {
     }
 
     func testCleanFileIsReady() {
-        let result = review([output("a.jpg")])
+        let result = review([output("2024/a.jpg")])
         XCTAssertEqual(result.entries[0].bucket, .ready)
         XCTAssertNil(result.entries[0].reason)
-        XCTAssertEqual(result.readyUnits, [ExternalDriveUnit(relativePaths: ["a.jpg"], byteCount: 10)])
+        XCTAssertEqual(result.readyUnits, [ExternalDriveUnit(relativePaths: ["2024/a.jpg"], byteCount: 10)])
         XCTAssertEqual(result.readyByteCount, 10)
     }
 
     func testUnsupportedConversionNoticeDoesNotBlock() {
-        let entry = single(output("a.avi", notices: ["Cannot convert this file", "Second"]))
+        let entry = single(output("2024/_Filmy/a.avi", notices: ["Cannot convert this file", "Second"]))
         XCTAssertEqual(entry.bucket, .ready)
         XCTAssertEqual(entry.note, "Cannot convert this file\nSecond")
     }
 
+    func testFileOutsideAnyYearFolderNeedsOrganizing() {
+        let entry = single(output("IMG.JPG"))
+        XCTAssertEqual(entry.bucket, .needsOrganizing)
+        XCTAssertEqual(entry.reason, "Not inside a year folder (choose a folder above the year folders)")
+        for path in ["Wakacje/USA/IMG.JPG", "0815/IMG.JPG", "9999/IMG.JPG", "_Filmy/a.mov"] {
+            XCTAssertEqual(single(output(path)).bucket, .needsOrganizing, path)
+        }
+    }
+
+    func testFileInsideAYearFolderIsReady() {
+        for path in ["Wakacje/USA/2024/IMG.JPG", "2024/_Filmy/a.mov", "1900/a.jpg", "2024/Trip/a.jpg"] {
+            XCTAssertEqual(single(output(path)).bucket, .ready, path)
+        }
+    }
+
+    func testNoUsableDateWinsOverTheYearFolderRule() {
+        XCTAssertEqual(single(output("IMG.JPG", hasUsableDate: false)).reason, "No usable date")
+    }
+
     func testLivePhotoPairMovesAsOneUnit() {
         let result = review(
-            [output("IMG_1.MOV"), output("IMG_1.HEIC")],
-            companions: ["IMG_1.MOV": "IMG_1.HEIC"]
+            [output("2024/IMG_1.MOV"), output("2024/IMG_1.HEIC")],
+            companions: ["2024/IMG_1.MOV": "2024/IMG_1.HEIC"]
         )
         XCTAssertEqual(result.readyUnits, [
-            ExternalDriveUnit(relativePaths: ["IMG_1.HEIC", "IMG_1.MOV"], byteCount: 20)
+            ExternalDriveUnit(relativePaths: ["2024/IMG_1.HEIC", "2024/IMG_1.MOV"], byteCount: 20)
         ])
         XCTAssertEqual(result.entries(in: .ready).count, 2)
     }
 
     func testLivePhotoWithNonReadyMemberHoldsBothBack() {
         let result = review(
-            [output("IMG_1.MOV", hasUsableDate: false), output("IMG_1.HEIC")],
-            companions: ["IMG_1.MOV": "IMG_1.HEIC"]
+            [output("2024/IMG_1.MOV", hasUsableDate: false), output("2024/IMG_1.HEIC")],
+            companions: ["2024/IMG_1.MOV": "2024/IMG_1.HEIC"]
         )
         XCTAssertTrue(result.readyUnits.isEmpty)
-        let heic = result.entries.first { $0.relativePath == "IMG_1.HEIC" }
-        let mov = result.entries.first { $0.relativePath == "IMG_1.MOV" }
+        let heic = result.entries.first { $0.relativePath == "2024/IMG_1.HEIC" }
+        let mov = result.entries.first { $0.relativePath == "2024/IMG_1.MOV" }
         XCTAssertEqual(heic?.bucket, .needsOrganizing)
         XCTAssertEqual(heic?.reason, "Its Live Photo pair “IMG_1.MOV” needs organizing")
         XCTAssertEqual(mov?.reason, "No usable date")
     }
 
     func testExistingDestinationGoesToAlreadyOnDestination() {
-        let result = review([output("a.jpg")], existing: ["a.jpg"])
+        let result = review([output("2024/a.jpg")], existing: ["2024/a.jpg"])
         XCTAssertEqual(result.entries[0].bucket, .alreadyOnDestination)
         XCTAssertTrue(result.readyUnits.isEmpty)
-        XCTAssertEqual(result.existingUnits.map(\.relativePaths), [["a.jpg"]])
+        XCTAssertEqual(result.existingUnits.map(\.relativePaths), [["2024/a.jpg"]])
     }
 
     func testPartlyExistingLivePhotoIsAProblem() {
         let result = review(
-            [output("IMG_1.MOV"), output("IMG_1.HEIC")],
-            companions: ["IMG_1.MOV": "IMG_1.HEIC"],
-            existing: ["IMG_1.MOV"]
+            [output("2024/IMG_1.MOV"), output("2024/IMG_1.HEIC")],
+            companions: ["2024/IMG_1.MOV": "2024/IMG_1.HEIC"],
+            existing: ["2024/IMG_1.MOV"]
         )
         XCTAssertEqual(result.entries.map(\.bucket), [.problem, .problem])
         XCTAssertEqual(result.entries[0].reason, "Part of this Live Photo is already on the drive")

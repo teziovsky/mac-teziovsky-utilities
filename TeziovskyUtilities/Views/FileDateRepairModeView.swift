@@ -550,11 +550,12 @@ private struct LocalMediaOrganizationPreviewCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Organization preview")
                         .font(.headline)
-                    Text(
-                        "\(service.organizationItems.count) moves planned from "
-                            + "\(service.scannedFileCount) supported media files · "
-                            + "\(service.organizationSkippedCount) already organized."
-                    )
+                    Text(LocalMediaKeptSection.previewSummary(
+                        moves: service.organizationItems.count,
+                        scanned: service.scannedFileCount,
+                        alreadyOrganized: service.organizationSkippedCount,
+                        kept: service.keptItems.count
+                    ))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     Text("No files move until you confirm this preview.")

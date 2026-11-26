@@ -105,4 +105,50 @@ final class LocalMediaTreeTests: XCTestCase {
         service.setExcluded(true, paths: ["a", "b"], in: .repair)
         XCTAssertEqual(service.selection(of: ["a", "b", "c"], in: .repair), .some)
     }
+
+    func testBuildsLargeTreesQuickly() {
+        // 20 000 files in 2 000 leaf folders spread over years and events.
+        let paths = (0..<20_000).map { index in
+            let folder = index / 10
+            return "\(2000 + folder % 20)/Event \(folder / 20)/Card \(folder % 3)/IMG_\(index).jpg"
+        }
+        let start = Date()
+        let rows = LocalMediaTree.rows(paths: paths, collapsed: [])
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(rows.filter { if case .file = $0.kind { true } else { false } }.count, 20_000)
+        XCTAssertLessThan(elapsed, 2, "building the tree took \(elapsed) s")
+        guard case let .folder(_, _, yearFiles) = rows[0].kind else { return XCTFail("folder") }
+        XCTAssertEqual(yearFiles.count, 1_000)
+        let position = Dictionary(uniqueKeysWithValues: paths.enumerated().map { ($1, $0) })
+        XCTAssertEqual(yearFiles, yearFiles.sorted { position[$0]! < position[$1]! }, "files keep input order")
+    }
+
+    func testCacheRebuildsOnlyWhenItsInputsChange() {
+        let cache = LocalMediaTreeCache()
+        let first = cache.tree(paths: paths, filter: "", collapsed: [])
+        _ = cache.tree(paths: paths, filter: "", collapsed: [])
+        XCTAssertEqual(cache.buildCount, 1)
+        XCTAssertEqual(first.matching, [0, 1, 2, 3])
+
+        let filtered = cache.tree(paths: paths, filter: "duel", collapsed: [])
+        XCTAssertEqual(cache.buildCount, 2)
+        XCTAssertEqual(filtered.matching, [2])
+        XCTAssertEqual(filtered.rows.last?.kind, LocalMediaTreeRow.Kind.file(index: 0))
+
+        _ = cache.tree(paths: paths, filter: "duel", collapsed: ["Imprezy"])
+        XCTAssertEqual(cache.buildCount, 3)
+        _ = cache.tree(paths: Array(paths.dropLast()), filter: "duel", collapsed: ["Imprezy"])
+        XCTAssertEqual(cache.buildCount, 4)
+    }
+
+    func testFolderSelectionWithManyFiles() {
+        let service = LocalPhotosService()
+        let files = (0..<50_000).map { "Big/\($0).jpg" }
+        XCTAssertEqual(service.selection(of: files, in: .organization), .all)
+        service.setExcluded(true, path: files[0], in: .organization)
+        XCTAssertEqual(service.selection(of: files, in: .organization), .some)
+        service.setExcluded(true, paths: files, in: .organization)
+        XCTAssertEqual(service.selection(of: files, in: .organization), .none)
+    }
 }

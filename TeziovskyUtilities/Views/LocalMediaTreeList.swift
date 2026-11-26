@@ -11,14 +11,16 @@ struct LocalMediaTreeList<Item: Identifiable, Row: View>: View {
     @ViewBuilder let row: (Item) -> Row
     @State private var collapsed: Set<String> = []
     @State private var showsAll = false
+    @State private var cache = LocalMediaTreeCache()
 
     /// Indent per tree level; also the chevron's width plus spacing, so a folder's checkbox
     /// sits in the same column as its files' checkboxes.
     private static var indent: CGFloat { 18 }
 
     var body: some View {
-        let matching = items.filter { LocalMediaListFilter.matches(path($0), query: filter) }
-        let rows = LocalMediaTree.rows(paths: matching.map(path), collapsed: collapsed)
+        let tree = cache.tree(paths: items.map(path), filter: filter, collapsed: collapsed)
+        let matching = tree.matching.map { items[$0] }
+        let rows = tree.rows
         let limited = showsAll
             ? (rows: rows, isTruncated: false)
             : LocalMediaTree.limitedRows(rows, fileLimit: localMediaListRowLimit)
@@ -80,7 +82,7 @@ struct LocalMediaTreeList<Item: Identifiable, Row: View>: View {
             .localMediaRowAnchor()
             .disabled(service.isRunning)
             .help(selection.checkboxHelp)
-            .accessibilityLabel("Include all files in \(title)")
+            .accessibilityLabel(selection.checkboxAccessibilityLabel(folder: title))
             .accessibilityValue(accessibilityValue(for: selection))
 
             Text(title)

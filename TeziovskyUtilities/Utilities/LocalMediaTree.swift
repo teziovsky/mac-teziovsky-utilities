@@ -40,6 +40,9 @@ enum LocalMediaTree {
         let name: String
         var folders: [String: Node] = [:]
         var fileIndexes: [Int] = []
+        /// Every file index under this folder, recursively, in input order; filled while the
+        /// tree is built so headers need no subtree walk.
+        var subtreeFileIndexes: [Int] = []
 
         init(name: String) { self.name = name }
 
@@ -51,10 +54,6 @@ enum LocalMediaTree {
                 case .orderedSame: return $0.name < $1.name
                 }
             }
-        }
-
-        var allFileIndexes: [Int] {
-            (fileIndexes + folders.values.flatMap(\.allFileIndexes)).sorted()
         }
     }
 
@@ -74,6 +73,7 @@ enum LocalMediaTree {
                     node.folders[folder] = next
                     node = next
                 }
+                node.subtreeFileIndexes.append(index)
             }
             node.fileIndexes.append(index)
         }
@@ -98,7 +98,7 @@ enum LocalMediaTree {
                     path += "/" + only.name
                 }
                 rows.append(LocalMediaTreeRow(
-                    kind: .folder(path: path, title: title, filePaths: merged.allFileIndexes.map { paths[$0] }),
+                    kind: .folder(path: path, title: title, filePaths: merged.subtreeFileIndexes.map { paths[$0] }),
                     depth: depth
                 ))
                 guard !collapsed.contains(path) else { continue }
@@ -108,6 +108,39 @@ enum LocalMediaTree {
                 rows.append(LocalMediaTreeRow(kind: .file(index: index), depth: depth, filePath: paths[index]))
             }
         }
+    }
+}
+
+/// Remembers the last tree built for a list, so re-renders caused by unrelated changes
+/// (progress, a checkbox) don't filter the paths and rebuild the tree again.
+final class LocalMediaTreeCache {
+    struct Tree {
+        /// Indexes into the `paths` passed in, of the paths matching the filter; file rows
+        /// point into this array.
+        let matching: [Int]
+        let rows: [LocalMediaTreeRow]
+    }
+
+    private struct Input: Equatable {
+        let paths: [String]
+        let filter: String
+        let collapsed: Set<String>
+    }
+
+    private var last: (input: Input, tree: Tree)?
+    private(set) var buildCount = 0
+
+    func tree(paths: [String], filter: String, collapsed: Set<String>) -> Tree {
+        let input = Input(paths: paths, filter: filter, collapsed: collapsed)
+        if let last, last.input == input { return last.tree }
+        let matching = paths.indices.filter { LocalMediaListFilter.matches(paths[$0], query: filter) }
+        let tree = Tree(
+            matching: matching,
+            rows: LocalMediaTree.rows(paths: matching.map { paths[$0] }, collapsed: collapsed)
+        )
+        last = (input, tree)
+        buildCount += 1
+        return tree
     }
 }
 
@@ -145,5 +178,10 @@ extension LocalMediaFolderSelection {
 
     var checkboxHelp: String {
         excludesOnClick ? "Exclude all files in this folder" : "Include all files in this folder"
+    }
+
+    /// Names the action a click performs, like the help text.
+    func checkboxAccessibilityLabel(folder title: String) -> String {
+        excludesOnClick ? "Exclude all files in \(title)" : "Include all files in \(title)"
     }
 }

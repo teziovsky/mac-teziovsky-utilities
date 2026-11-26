@@ -19,6 +19,17 @@ struct LocalMediaKeptSection: View {
                 .font(.headline)
         }
     }
+
+    /// The Organize preview's summary line; kept files are named so the section below the
+    /// list is noticed.
+    static func previewSummary(moves: Int, scanned: Int, alreadyOrganized: Int, kept: Int) -> String {
+        var text = "\(moves) moves planned from \(scanned) supported media files · "
+            + "\(alreadyOrganized) already organized"
+        if kept > 0 {
+            text += " · \(kept) kept in their year folder"
+        }
+        return text + "."
+    }
 }
 
 private struct LocalMediaKeptRow: View {

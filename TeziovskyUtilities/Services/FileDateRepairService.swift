@@ -1032,9 +1032,18 @@ extension LocalPhotosService {
     }
 
     func selection(of paths: [String], in step: LocalMediaStep) -> LocalMediaFolderSelection {
-        let excluded = paths.filter { isExcluded(path: $0, in: step) }.count
-        if excluded == 0 { return .all }
-        return excluded == paths.count ? .none : .some
+        guard let excluded = excludedPaths[step], !excluded.isEmpty else { return .all }
+        var sawIncluded = false
+        var sawExcluded = false
+        for path in paths {
+            if excluded.contains(path) {
+                sawExcluded = true
+            } else {
+                sawIncluded = true
+            }
+            if sawIncluded, sawExcluded { return .some }
+        }
+        return sawExcluded ? .none : .all
     }
 }
 

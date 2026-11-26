@@ -41,4 +41,21 @@ final class LocalMediaTreeListTests: XCTestCase {
         XCTAssertEqual(LocalMediaFolderSelection.some.checkboxHelp, "Include all files in this folder")
         XCTAssertEqual(LocalMediaFolderSelection.none.checkboxHelp, "Include all files in this folder")
     }
+
+    func testFolderCheckboxAccessibilityLabelNamesTheAction() {
+        XCTAssertEqual(LocalMediaFolderSelection.all.checkboxAccessibilityLabel(folder: "2019"), "Exclude all files in 2019")
+        XCTAssertEqual(LocalMediaFolderSelection.some.checkboxAccessibilityLabel(folder: "2019"), "Include all files in 2019")
+        XCTAssertEqual(LocalMediaFolderSelection.none.checkboxAccessibilityLabel(folder: "2019"), "Include all files in 2019")
+    }
+
+    func testOrganizationSummaryMentionsKeptFiles() {
+        XCTAssertEqual(
+            LocalMediaKeptSection.previewSummary(moves: 5, scanned: 40, alreadyOrganized: 20, kept: 0),
+            "5 moves planned from 40 supported media files · 20 already organized."
+        )
+        XCTAssertEqual(
+            LocalMediaKeptSection.previewSummary(moves: 5, scanned: 40, alreadyOrganized: 20, kept: 12),
+            "5 moves planned from 40 supported media files · 20 already organized · 12 kept in their year folder."
+        )
+    }
 }

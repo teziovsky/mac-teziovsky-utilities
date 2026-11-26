@@ -168,6 +168,21 @@ struct LocalMediaOrganizationItem: Identifiable, Sendable, Equatable {
     let destinationWasRenamed: Bool
 }
 
+extension LocalMediaOrganizationItem {
+    fileprivate func moved(to destination: URL, root: URL) -> LocalMediaOrganizationItem {
+        LocalMediaOrganizationItem(
+            sourceURL: sourceURL,
+            sourceRelativePath: sourceRelativePath,
+            destinationURL: destination,
+            destinationRelativePath: LocalMediaOrganizationPlanner.relativePath(for: destination, root: root),
+            proposedDate: proposedDate,
+            proposedSource: proposedSource,
+            isVideo: isVideo,
+            destinationWasRenamed: destination.lastPathComponent != destinationURL.lastPathComponent
+        )
+    }
+}
+
 struct LocalMediaOrganizationSummary: Sendable, Equatable {
     var moved = 0
     var skipped = 0
@@ -282,6 +297,7 @@ enum LocalMediaOrganizationPlanner {
         rootDirectory: URL,
         evidence: [FileDateEvidence],
         isVideo: Bool,
+        groupsWithPhotos: Bool = false,
         now: Date = Date()
     ) -> LocalMediaOrganizationItem? {
         guard let oldest = FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence, now: now) else {
@@ -292,7 +308,9 @@ enum LocalMediaOrganizationPlanner {
         let parent = fileURL.deletingLastPathComponent()
         let anchor: URL
         var preservedDirectories: [String] = []
-        var prependVideoDirectory = isVideo
+        // Live Photo motion files follow their still into the photo folder, not `_Filmy`.
+        let placesAsVideo = isVideo && !groupsWithPhotos
+        var prependVideoDirectory = placesAsVideo
 
         if let currentYearDirectory = nearestYearDirectory(startingAt: parent) {
             preservedDirectories = relativeDirectoryComponents(
@@ -301,14 +319,14 @@ enum LocalMediaOrganizationPlanner {
             )
             let isInVideoDirectory = preservedDirectories.contains(videoDirectoryName)
             if currentYearDirectory.lastPathComponent == year {
-                if !isVideo, !isInVideoDirectory {
+                if !placesAsVideo, !isInVideoDirectory {
                     return nil
                 }
-                if isVideo, isInVideoDirectory {
+                if placesAsVideo, isInVideoDirectory {
                     return nil
                 }
             }
-            if isVideo {
+            if placesAsVideo {
                 prependVideoDirectory = false
                 if !isInVideoDirectory {
                     preservedDirectories.append(videoDirectoryName)
@@ -346,33 +364,76 @@ enum LocalMediaOrganizationPlanner {
         )
     }
 
+    private static let livePhotoStillExtensions: Set<String> = ["heic", "heif", "jpg", "jpeg"]
+    private static let livePhotoMotionExtensions: Set<String> = ["mov"]
+
+    /// Maps each Live Photo motion file to its still: a `.mov` sharing the directory and the
+    /// (case-insensitive) base name with a HEIC/JPEG.
+    static func livePhotoCompanions(in relativePaths: [String]) -> [String: String] {
+        var stillsByKey: [String: String] = [:]
+        for path in relativePaths.sorted()
+        where livePhotoStillExtensions.contains((path as NSString).pathExtension.lowercased()) {
+            let key = pairKey(path)
+            if stillsByKey[key] == nil {
+                stillsByKey[key] = path
+            }
+        }
+        var companions: [String: String] = [:]
+        for path in relativePaths
+        where livePhotoMotionExtensions.contains((path as NSString).pathExtension.lowercased()) {
+            if let still = stillsByKey[pairKey(path)] {
+                companions[path] = still
+            }
+        }
+        return companions
+    }
+
+    private static func pairKey(_ relativePath: String) -> String {
+        (relativePath as NSString).deletingPathExtension.lowercased()
+    }
+
+    /// Assigns collision-free destinations. Live Photo motion files are placed after their
+    /// stills and reuse the still's final base name (`IMG (1).HEIC` → `IMG (1).MOV`) so the
+    /// pair stays recognisable.
     static func resolveCollisions(
         _ candidates: [LocalMediaOrganizationItem],
         rootDirectory: URL,
+        livePhotoCompanions: [String: String] = [:],
         fileManager: FileManager = .default
     ) -> [LocalMediaOrganizationItem] {
         var reservedPaths = Set<String>()
-        return candidates
-            .sorted {
-                $0.sourceRelativePath.localizedStandardCompare($1.sourceRelativePath) == .orderedAscending
+        let sorted = candidates.sorted {
+            $0.sourceRelativePath.localizedStandardCompare($1.sourceRelativePath) == .orderedAscending
+        }
+        let motion = sorted.filter { livePhotoCompanions[$0.sourceRelativePath] != nil }
+        let others = sorted.filter { livePhotoCompanions[$0.sourceRelativePath] == nil }
+
+        var resolved: [String: LocalMediaOrganizationItem] = [:]
+        for item in others {
+            let destination = uniqueDestination(
+                preferred: item.destinationURL,
+                reservedPaths: &reservedPaths,
+                fileManager: fileManager
+            )
+            resolved[item.sourceRelativePath] = item.moved(to: destination, root: rootDirectory)
+        }
+        for item in motion {
+            var preferred = item.destinationURL
+            if let stillPath = livePhotoCompanions[item.sourceRelativePath],
+               let still = resolved[stillPath] {
+                let base = still.destinationURL.deletingPathExtension().lastPathComponent
+                preferred = still.destinationURL.deletingLastPathComponent()
+                    .appendingPathComponent(base)
+                    .appendingPathExtension(item.destinationURL.pathExtension)
             }
-            .map { item in
-                let destination = uniqueDestination(
-                    preferred: item.destinationURL,
-                    reservedPaths: &reservedPaths,
-                    fileManager: fileManager
-                )
-                return LocalMediaOrganizationItem(
-                    sourceURL: item.sourceURL,
-                    sourceRelativePath: item.sourceRelativePath,
-                    destinationURL: destination,
-                    destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
-                    proposedDate: item.proposedDate,
-                    proposedSource: item.proposedSource,
-                    isVideo: item.isVideo,
-                    destinationWasRenamed: destination.lastPathComponent != item.destinationURL.lastPathComponent
-                )
-            }
+            let destination = uniqueDestination(
+                preferred: preferred,
+                reservedPaths: &reservedPaths,
+                fileManager: fileManager
+            )
+            resolved[item.sourceRelativePath] = item.moved(to: destination, root: rootDirectory)
+        }
+        return sorted.compactMap { resolved[$0.sourceRelativePath] }
     }
 
     private static func uniqueDestination(
@@ -431,6 +492,10 @@ enum LocalMediaOrganizationPlanner {
         let rootPath = canonicalPath(for: rootDirectory)
         let path = canonicalPath(for: url)
         return path == rootPath || path.hasPrefix(rootPath + "/")
+    }
+
+    fileprivate static func relativePath(for url: URL, root: URL) -> String {
+        makeRelativePath(for: url, root: root)
     }
 
     private static func makeRelativePath(for url: URL, root: URL) -> String {

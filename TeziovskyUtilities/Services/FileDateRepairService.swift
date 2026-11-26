@@ -27,6 +27,9 @@ enum FileDateRepairScanner {
         progress: @escaping @Sendable (FileDateRepairProgress) async -> Void
     ) async throws -> FileDateScanResult {
         let enumeration = try enumerateFiles(in: directory, supportedExtensions: supportedExtensions)
+        let livePhotoCompanions = LocalMediaOrganizationPlanner.livePhotoCompanions(
+            in: enumeration.files.map(\.relativePath)
+        )
         var failures = enumeration.failures
         var conversionCandidates: [LocalMediaConversionItem] = []
         var items: [FileDateRepairItem] = []
@@ -64,7 +67,8 @@ enum FileDateRepairScanner {
                             relativePath: file.relativePath,
                             rootDirectory: directory,
                             evidence: evidence,
-                            isVideo: isVideo
+                            isVideo: isVideo,
+                            groupsWithPhotos: livePhotoCompanions[file.relativePath] != nil
                         )
                         return FileDateScanOutput(
                             relativePath: file.relativePath,
@@ -125,7 +129,8 @@ enum FileDateRepairScanner {
             items: items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending },
             organizationItems: LocalMediaOrganizationPlanner.resolveCollisions(
                 organizationCandidates,
-                rootDirectory: directory
+                rootDirectory: directory,
+                livePhotoCompanions: livePhotoCompanions
             ),
             organizationSkippedCount: organizationSkippedCount,
             failures: failures,

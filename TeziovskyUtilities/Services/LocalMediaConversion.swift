@@ -321,7 +321,21 @@ enum LocalMediaConverter {
         }
     }
 
-    private static func markConverted(_ sourceURL: URL, destination: URL) {
+    /// The name of the converted copy stored in the marker, or nil when `url` is unmarked.
+    static func convertedTwinName(of url: URL) -> String? {
+        url.path.withCString { path in
+            conversionMarker.withCString { name in
+                let size = getxattr(path, name, nil, 0, 0, 0)
+                guard size > 0 else { return nil }
+                var buffer = [UInt8](repeating: 0, count: size)
+                let read = getxattr(path, name, &buffer, size, 0, 0)
+                guard read > 0 else { return nil }
+                return String(bytes: buffer.prefix(read), encoding: .utf8)
+            }
+        }
+    }
+
+    static func markConverted(_ sourceURL: URL, destination: URL) {
         let value = Array(destination.lastPathComponent.utf8)
         sourceURL.path.withCString { path in
             conversionMarker.withCString { name in

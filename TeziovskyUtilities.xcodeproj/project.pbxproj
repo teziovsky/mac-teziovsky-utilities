@@ -67,6 +67,7 @@
 		A00100000000000000000A02 /* ExternalDriveClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000A02 /* ExternalDriveClassifier.swift */; };
 		A00200000000000000000001 /* FileDateRepairModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000001 /* FileDateRepairModels.swift */; };
 		A00200000000000000000B01 /* LocalMediaOrganizationPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000B01 /* LocalMediaOrganizationPlanner.swift */; };
+		A00200000000000000000E5F /* LocalMediaReplacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000E5F /* LocalMediaReplacement.swift */; };
 		A00200000000000000000002 /* FileDateRepairService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000002 /* FileDateRepairService.swift */; };
 		A0010000000000000000F0A1 /* ExternalDriveModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A1 /* ExternalDriveModeView.swift */; };
 		A0010000000000000000F0A3 /* ExternalDriveText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A3 /* ExternalDriveText.swift */; };
@@ -145,6 +146,7 @@
 		B00100000000000000000A02 /* ExternalDriveClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveClassifier.swift; sourceTree = "<group>"; };
 		B00200000000000000000001 /* FileDateRepairModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModels.swift; sourceTree = "<group>"; };
 		B00200000000000000000B01 /* LocalMediaOrganizationPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaOrganizationPlanner.swift; sourceTree = "<group>"; };
+		B00200000000000000000E5F /* LocalMediaReplacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaReplacement.swift; sourceTree = "<group>"; };
 		B00200000000000000000002 /* FileDateRepairService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairService.swift; sourceTree = "<group>"; };
 		B0010000000000000000F0A1 /* ExternalDriveModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveModeView.swift; sourceTree = "<group>"; };
 		B0010000000000000000F0A3 /* ExternalDriveText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveText.swift; sourceTree = "<group>"; };
@@ -202,6 +204,7 @@
 				B00200000000000000000A01 /* ExternalDriveModels.swift */,
 				B00200000000000000000001 /* FileDateRepairModels.swift */,
 				B00200000000000000000B01 /* LocalMediaOrganizationPlanner.swift */,
+				B00200000000000000000E5F /* LocalMediaReplacement.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -437,6 +440,7 @@
 				A00100000000000000000A03 /* ExternalDriveLocations.swift in Sources */,
 				A00200000000000000000001 /* FileDateRepairModels.swift in Sources */,
 				A00200000000000000000B01 /* LocalMediaOrganizationPlanner.swift in Sources */,
+				A00200000000000000000E5F /* LocalMediaReplacement.swift in Sources */,
 				A00200000000000000000002 /* FileDateRepairService.swift in Sources */,
 				A0010000000000000000F0A1 /* ExternalDriveModeView.swift in Sources */,
 				A0010000000000000000F0A3 /* ExternalDriveText.swift in Sources */,

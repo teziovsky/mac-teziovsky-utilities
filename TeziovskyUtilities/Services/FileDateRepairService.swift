@@ -13,6 +13,8 @@ struct FileDateScanOutput: Sendable {
     let outsideScannedFolderYear: String?
     /// Set when the file stays in its year folder because only file-system dates disagree.
     var keptItem: LocalMediaKeptItem?
+    /// Set when a "keep originals" conversion left this file next to its converted copy.
+    var replaceablePair: LocalMediaReplaceablePair?
     /// Non-fatal problems worth showing (unsupported conversion, unreachable year folder).
     let notices: [FileDateRepairFailure]
     let failure: FileDateRepairFailure?
@@ -30,6 +32,7 @@ struct FileDateScanResult: Sendable {
     let organizationItems: [LocalMediaOrganizationItem]
     let organizationSkippedCount: Int
     let keptItems: [LocalMediaKeptItem]
+    let replaceablePairs: [LocalMediaReplaceablePair]
     let failures: [FileDateRepairFailure]
     let scannedFileCount: Int
 }
@@ -55,6 +58,7 @@ enum FileDateRepairScanner {
         var organizationCandidates: [LocalMediaOrganizationItem] = []
         var organizationSkippedCount = 0
         var keptItems: [LocalMediaKeptItem] = []
+        var replaceablePairs: [LocalMediaReplaceablePair] = []
 
         for output in scanned.outputs {
             if let item = output.conversionCandidate { conversionCandidates.append(item) }
@@ -62,6 +66,7 @@ enum FileDateRepairScanner {
             if let item = output.organizationCandidate { organizationCandidates.append(item) }
             if output.isAlreadyOrganized { organizationSkippedCount += 1 }
             if let kept = output.keptItem { keptItems.append(kept) }
+            if let pair = output.replaceablePair { replaceablePairs.append(pair) }
             failures.append(contentsOf: output.notices)
             if let failure = output.failure { failures.append(failure) }
         }
@@ -81,6 +86,7 @@ enum FileDateRepairScanner {
             keptItems: keptItems.sorted {
                 $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
             },
+            replaceablePairs: LocalMediaReplaceablePair.sorted(replaceablePairs),
             failures: failures,
             scannedFileCount: scanned.outputs.count
         )
@@ -107,12 +113,18 @@ enum FileDateRepairScanner {
                 let file = enumeration.files[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    try await scanFile(
+                    var output = try await scanFile(
                         file,
                         directory: directory,
                         conversionConfig: conversionConfig,
                         groupsWithPhotos: livePhotoCompanions[file.relativePath] != nil
                     )
+                    output.replaceablePair = LocalMediaReplaceablePair.detect(
+                        originalURL: file.url,
+                        relativePath: file.relativePath,
+                        isVideo: LocalMediaConversionPlanner.isVideoCandidate(file.url)
+                    )
+                    return output
                 }
             }
 
@@ -406,6 +418,7 @@ enum LocalMediaStep: Hashable, Sendable {
     case conversion
     case repair
     case organization
+    case replacement
 }
 
 /// Path search for the review lists: case-insensitive and folding letters like "Ł" or "ż"
@@ -430,6 +443,7 @@ final class LocalPhotosService: ObservableObject {
     @Published private(set) var organizationItems: [LocalMediaOrganizationItem] = []
     @Published private(set) var organizationSkippedCount = 0
     @Published private(set) var keptItems: [LocalMediaKeptItem] = []
+    @Published private(set) var replaceablePairs: [LocalMediaReplaceablePair] = []
     @Published private(set) var failures: [FileDateRepairFailure] = []
     @Published private(set) var progress = FileDateRepairProgress()
     @Published private(set) var conversionProgress = FileDateRepairProgress()
@@ -525,6 +539,7 @@ final class LocalPhotosService: ObservableObject {
                 organizationItems = result.organizationItems
                 organizationSkippedCount = result.organizationSkippedCount
                 keptItems = result.keptItems
+                replaceablePairs = result.replaceablePairs
                 failures = result.failures
                 scannedFileCount = result.scannedFileCount
                 lastScanCompleted = true
@@ -680,6 +695,7 @@ final class LocalPhotosService: ObservableObject {
                 organizationItems = refreshed.organizationItems
                 organizationSkippedCount = refreshed.organizationSkippedCount
                 keptItems = refreshed.keptItems
+                replaceablePairs = refreshed.replaceablePairs
                 failures = moveFailures + refreshed.failures
                 scannedFileCount = refreshed.scannedFileCount
             } catch is CancellationError {
@@ -733,6 +749,7 @@ final class LocalPhotosService: ObservableObject {
         organizationItems = []
         organizationSkippedCount = 0
         keptItems = []
+        replaceablePairs = []
         failures = []
         progress = FileDateRepairProgress()
         conversionProgress = FileDateRepairProgress()
@@ -767,6 +784,7 @@ extension LocalPhotosService {
             organizationItems = refreshed.organizationItems
             organizationSkippedCount = refreshed.organizationSkippedCount
             keptItems = refreshed.keptItems
+            replaceablePairs = refreshed.replaceablePairs
         } catch is CancellationError {
             return
         } catch {
@@ -862,6 +880,7 @@ extension LocalPhotosService {
                 organizationItems = refreshed.organizationItems
                 organizationSkippedCount = refreshed.organizationSkippedCount
                 keptItems = refreshed.keptItems
+                replaceablePairs = refreshed.replaceablePairs
                 failures = conversionFailures + refreshed.failures
                 scannedFileCount = refreshed.scannedFileCount
             } catch is CancellationError {

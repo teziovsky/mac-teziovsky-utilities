@@ -50,7 +50,7 @@ Every workflow uses the same shortcuts, all listed in the menu bar. When a short
 | Shortcut | Command | Export iCloud Photos | Organize Local Photos | Organize Drone Footage |
 |----------|---------|----------------------|-----------------------|------------------------|
 | ⇧⌘H | Go → Home | ✓ | ✓ (scan results are discarded) | ✓ |
-| ⌘[ / Esc | Go → Back one level | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | previous step; never changes files |
+| ⌘[ / Esc | Go → Back one level (Esc in a text field first leaves the field) | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | previous step; never changes files |
 | ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose a project folder |
 | ⇧⌘R | File → Reveal in Finder | export folder | media folder | project folder |
 | ⌘R | View → Refresh | reload albums | rescan the folder | re-check the current step |
@@ -62,7 +62,7 @@ Every workflow uses the same shortcuts, all listed in the menu bar. When a short
 | Space / ⌘Y | View → Quick Look | ✓ | — | — |
 | ⌘E | View → Organize Album… | ✓ | — | — |
 | ⌘1…⌘9 | Albums → album 1–9 | ✓ | — | — |
-| ⌘↓ / ⌘↑ | Albums → Next / Previous Album | ✓ | — | — |
+| ⌘↓ / ⌘↑ | Albums → Next / Previous Album (bound in this window only, so text fields keep them) | ✓ | — | — |
 | ←↑↓→ | Move the selection in the grid | ✓ | — | — |
 
 Home and Back are blocked while work that must finish (or be cancelled with its Cancel button) is running: organizing an album, scanning/converting/repairing/organizing local media, HandBrake compression, or a finalize step.

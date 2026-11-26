@@ -259,6 +259,11 @@ extension AppState {
 
 extension AppState {
     func run(_ command: AppCommand) {
+        // Esc in a text field (e.g. the Local Photos filter) first leaves the field, like in
+        // Finder; only the next Esc navigates.
+        if command == .escape, endTextEditingInMainWindow() {
+            return
+        }
         switch decision(for: command) {
         case .notice(let message):
             showNotice(message)
@@ -289,6 +294,13 @@ extension AppState {
                 self?.notice = nil
             }
         }
+    }
+
+    private func endTextEditingInMainWindow() -> Bool {
+        guard let mainWindow, let editor = mainWindow.firstResponder as? NSText, editor.isFieldEditor else {
+            return false
+        }
+        return mainWindow.makeFirstResponder(nil)
     }
 
     /// Whether a sheet, dialog, panel or another window (e.g. Settings) is in front of the

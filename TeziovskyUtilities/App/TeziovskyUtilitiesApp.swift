@@ -86,10 +86,10 @@ private struct TeziovskyUtilitiesCommands: Commands {
 
             Divider()
 
+            // ⌘↓ / ⌘↑ are bound in the Photos window only (MainWindowKeyboardShortcuts): as
+            // menu shortcuts they would take caret movement away from every text field.
             Button("Next Album") { appState.run(.nextAlbum) }
-                .keyboardShortcut(.downArrow, modifiers: .command)
             Button("Previous Album") { appState.run(.previousAlbum) }
-                .keyboardShortcut(.upArrow, modifiers: .command)
         }
     }
 

@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import ImageIO
 @testable import TeziovskyUtilities
@@ -102,6 +103,32 @@ final class AppCommandDecisionTests: XCTestCase {
         XCTAssertNil(state.selectedAlbum)
         state.run(.back)
         XCTAssertEqual(state.route, .home)
+    }
+
+    func testEscapeFirstLeavesATextFieldInsteadOfGoingBack() throws {
+        let state = makeState()
+        state.route = .photos
+        state.selectedAlbum = PhotoAlbum(
+            id: "a", name: "Trip", mediaCount: 1, photoCount: 1, videoCount: 0, collectionIdentifier: "a"
+        )
+        state.selectedMediaID = "photo"
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 200, height: 24))
+        window.contentView?.addSubview(field)
+        state.mainWindow = window
+        XCTAssertTrue(window.makeFirstResponder(field))
+        XCTAssertTrue((window.firstResponder as? NSText)?.isFieldEditor == true, "Field should be editing")
+
+        state.run(.escape)
+        XCTAssertEqual(state.selectedMediaID, "photo", "The first Esc only leaves the text field")
+        XCTAssertNil(state.notice)
+        XCTAssertFalse(window.firstResponder is NSText)
+
+        state.run(.escape)
+        XCTAssertNil(state.selectedMediaID, "The next Esc navigates back")
     }
 
     func testLocalPhotosBlocksHomeAndEscapeWhileScanningThenAllowsHome() async throws {

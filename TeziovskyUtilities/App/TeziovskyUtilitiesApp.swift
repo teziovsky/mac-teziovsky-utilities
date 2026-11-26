@@ -21,7 +21,7 @@ struct TeziovskyUtilitiesApp: App {
                 Button("Toggle Sidebar") {
                     appState.toggleSidebarVisibility()
                 }
-                .keyboardShortcut("s", modifiers: [.control, .command])
+                .keyboardShortcut("s", modifiers: .command)
                 .disabled(appState.route != .photos)
             }
             TeziovskyUtilitiesAlbumCommands(appState: appState)

@@ -75,6 +75,7 @@ On first launch (before Photos access is granted) the app shows a short explaine
 
 - macOS 14+
 - Xcode 15+
+- [pnpm](https://pnpm.io) 11 for the scripts in `package.json` (`pnpm run …` is rejected by its `devEngines` check)
 - Photos library access (only for the Export iCloud Photos workflow)
 
 ## SwiftLint
@@ -83,8 +84,8 @@ Style and conventions are enforced with [SwiftLint](https://realm.github.io/Swif
 
 | Command | Description |
 |---------|-------------|
-| `npm run lint` | Lint `TeziovskyUtilities/` and `Tests/` |
-| `npm run lint:fix` | Auto-fix correctable issues, then lint again |
+| `pnpm run lint` | Lint `TeziovskyUtilities/` and `Tests/` |
+| `pnpm run lint:fix` | Auto-fix correctable issues, then lint again |
 
 SwiftLint also runs during **Xcode** builds (Run Script phase after compile) and **SPM** builds via the [SwiftLintPlugins](https://github.com/SimplyDanny/SwiftLintPlugins) build-tool plugin (version **0.63.3**). The Xcode script uses the package’s bundled `swiftlint` binary when available, otherwise Homebrew’s.
 
@@ -95,27 +96,27 @@ For CI / unattended `xcodebuild`, pass `-skipPackagePluginValidation` when using
 ### Xcode
 
 ```bash
-npm run open
+pnpm run open
 ```
 
 Select the **TeziovskyUtilities** scheme and press **Run** (⌘R).
 
-### npm scripts (Xcode — full `.app` bundle)
+### pnpm scripts (Xcode — full `.app` bundle)
 
 | Script | Description |
 |--------|-------------|
-| `npm run clean` | Remove `build/`, `dist/`, and run `xcodebuild clean` |
-| `npm run build` | Debug build → `build/DerivedData/Build/Products/Debug/TeziovskyUtilities.app` |
-| `npm run clean:build` | Clean, then debug build |
-| `npm run run` | Debug build and launch the app |
-| `npm run build:production` | Release build (optimized) |
-| `npm run release` | Release build, copy `.app` to `dist/`, create `dist/TeziovskyUtilities-macOS.zip` |
-| `npm run install` | Release build and install to `/Applications/Teziovsky Utilities.app` |
-| `npm run install:open` | Same as `install`, then launch the app |
+| `pnpm run clean` | Remove `build/`, `dist/`, and run `xcodebuild clean` |
+| `pnpm run build` | Debug build → `build/DerivedData/Build/Products/Debug/TeziovskyUtilities.app` |
+| `pnpm run clean:build` | Clean, then debug build |
+| `pnpm run run` | Debug build and launch the app |
+| `pnpm run build:production` | Release build (optimized) |
+| `pnpm run release` | Release build, copy `.app` to `dist/`, create `dist/TeziovskyUtilities-macOS.zip` |
+| `pnpm run install` | Release build and install to `/Applications/Teziovsky Utilities.app` |
+| `pnpm run install:open` | Same as `install`, then launch the app |
 
 ```bash
-npm run run
-npm run install
+pnpm run run
+pnpm run install
 ```
 
 ### Swift Package Manager (compile only)
@@ -123,11 +124,11 @@ npm run install
 This repo includes a [`Package.swift`](Package.swift) so you can compile from the CLI:
 
 ```bash
-swift build          # or: npm run swift:build
-swift package clean  # or: npm run swift:clean
+swift build          # or: pnpm run swift:build
+swift package clean  # or: pnpm run swift:clean
 ```
 
-SPM builds a bare executable in `.build/debug/` — **not** a signed `.app` with icons and Photos entitlements. To run the real app, use **`npm run run`** or Xcode (⌘R).
+SPM builds a bare executable in `.build/debug/` — **not** a signed `.app` with icons and Photos entitlements. To run the real app, use **`pnpm run run`** or Xcode (⌘R).
 
 Set your development team in Xcode for signed release builds outside this repo (scripts use `CODE_SIGNING_ALLOWED=NO` for local CLI builds).
 

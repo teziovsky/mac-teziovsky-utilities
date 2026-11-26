@@ -202,8 +202,46 @@ final class ExternalDriveClassifierTests: XCTestCase {
             try Data().write(to: root.appendingPathComponent(name))
         }
         XCTAssertEqual(
-            ExternalDriveClassifier.otherFiles(in: root, supportedExtensions: ["jpg"]),
+            ExternalDriveClassifier.otherFiles(in: root, supportedExtensions: ["jpg"]).paths,
             ["b.jpg.xmp", "notes.txt"]
         )
+    }
+
+    func testUnreadableOtherFileIsAProblemInsteadOfDropped() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in [".hidden.txt", "a.jpg", "broken.txt", "notes.txt"] {
+            try Data().write(to: root.appendingPathComponent(name))
+        }
+        let unreadable: Set<String> = [".hidden.txt", "a.jpg", "broken.txt"]
+
+        let other = ExternalDriveClassifier.otherFiles(in: root, supportedExtensions: ["jpg"]) { url, keys in
+            if unreadable.contains(url.lastPathComponent) { throw CocoaError(.fileReadNoPermission) }
+            return try url.resourceValues(forKeys: keys)
+        }
+
+        // Hidden files and supported media are the scanner's to report.
+        XCTAssertEqual(other.paths, ["notes.txt"])
+        XCTAssertEqual(other.failures.map(\.relativePath), ["broken.txt"])
+        XCTAssertFalse(other.failures.first?.message.isEmpty ?? true)
+    }
+
+    func testOtherFileFailuresAreProblems() {
+        let scanFailure = FileDateRepairFailure(relativePath: "locked", message: "Permission denied")
+        let result = ExternalDriveClassifier.classify(
+            FileDateScanOutputs(outputs: [], enumerationFailures: [scanFailure], livePhotoCompanions: [:]),
+            otherFiles: [],
+            otherFailures: [
+                FileDateRepairFailure(relativePath: "broken.txt", message: "Couldn't read it"),
+                FileDateRepairFailure(relativePath: "locked", message: "Duplicate")
+            ],
+            byteCount: { _ in 0 },
+            existsOnDestination: { _ in false }
+        )
+        XCTAssertEqual(result.entries.map(\.relativePath), ["broken.txt", "locked"])
+        XCTAssertEqual(result.entries.map(\.bucket), [.problem, .problem])
+        XCTAssertEqual(result.entries.map(\.reason), ["Couldn't read it", "Permission denied"])
     }
 }

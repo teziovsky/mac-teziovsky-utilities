@@ -201,9 +201,9 @@ final class ExternalDriveTransferService: ObservableObject {
     private nonisolated static func classify(
         _ scan: FileDateScanOutputs, source: URL, destination: URL, extensions: Set<String>
     ) -> (review: ExternalDriveReview, fingerprints: [String: FileMetadataFingerprint]) {
+        let other = ExternalDriveClassifier.otherFiles(in: source, supportedExtensions: extensions)
         let review = ExternalDriveClassifier.classify(
-            scan,
-            otherFiles: ExternalDriveClassifier.otherFiles(in: source, supportedExtensions: extensions),
+            scan, otherFiles: other.paths, otherFailures: other.failures,
             byteCount: { path in
                 var info = stat()
                 guard lstat(source.appendingPathComponent(path).path, &info) == 0 else { return 0 }

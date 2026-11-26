@@ -4,6 +4,7 @@ enum ExternalDriveClassifier {
     static func classify(
         _ scan: FileDateScanOutputs,
         otherFiles: [String],
+        otherFailures: [FileDateRepairFailure] = [],
         byteCount: (String) -> Int64,
         existsOnDestination: (String) -> Bool
     ) -> ExternalDriveReview {
@@ -37,7 +38,9 @@ enum ExternalDriveClassifier {
             }
         }
 
-        for failure in scan.enumerationFailures {
+        let scanFailurePaths = Set(scan.enumerationFailures.map(\.relativePath))
+        let extraFailures = otherFailures.filter { !scanFailurePaths.contains($0.relativePath) }
+        for failure in scan.enumerationFailures + extraFailures {
             entries.append(ExternalDriveEntry(
                 relativePath: failure.relativePath, bucket: .problem, reason: failure.message,
                 note: nil, byteCount: byteCount(failure.relativePath)
@@ -99,20 +102,36 @@ enum ExternalDriveClassifier {
         return (members.map { entry($0, .problem, reason) }, .held)
     }
 
-    /// Relative paths of visible regular files that are not supported media.
-    /// Skips hidden entries, packages and symlinks like the scanner.
-    static func otherFiles(in root: URL, supportedExtensions: Set<String>) -> [String] {
+    /// Relative paths of visible regular files that are not supported media, and the visible entries that
+    /// couldn't be read (supported media is the scanner's to report). Skips hidden entries, packages and
+    /// symlinks like the scanner.
+    static func otherFiles(
+        in root: URL,
+        supportedExtensions: Set<String>,
+        resourceValues: (URL, Set<URLResourceKey>) throws -> URLResourceValues = { try $0.resourceValues(forKeys: $1) }
+    ) -> (paths: [String], failures: [FileDateRepairFailure]) {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isPackageKey]
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants],
             errorHandler: { _, _ in true }
-        ) else { return [] }
+        ) else { return ([], []) }
 
         var result: [String] = []
+        var failures: [FileDateRepairFailure] = []
         for case let url as URL in enumerator {
-            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+            let values: URLResourceValues
+            do {
+                values = try resourceValues(url, Set(keys))
+            } catch {
+                if !url.lastPathComponent.hasPrefix("."),
+                   !FileDateRepairExtensions.supports(url, extensions: supportedExtensions) {
+                    failures.append(FileDateRepairFailure(
+                        relativePath: relativePath(for: url, root: root), message: error.localizedDescription))
+                }
+                continue
+            }
             if url.lastPathComponent.hasPrefix(".") {
                 if values.isDirectory == true { enumerator.skipDescendants() }
                 continue
@@ -125,7 +144,7 @@ enum ExternalDriveClassifier {
                   !FileDateRepairExtensions.supports(url, extensions: supportedExtensions) else { continue }
             result.append(relativePath(for: url, root: root))
         }
-        return result.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return (result.sorted { $0.localizedStandardCompare($1) == .orderedAscending }, failures)
     }
 
     private static func relativePath(for url: URL, root: URL) -> String {

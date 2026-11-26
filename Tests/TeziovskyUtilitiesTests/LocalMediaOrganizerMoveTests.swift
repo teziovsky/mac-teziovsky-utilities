@@ -70,7 +70,8 @@ final class LocalMediaOrganizerMoveTests: XCTestCase {
             try await LocalMediaOrganizer.move(item)
         }
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Inbox/2020/IMG_0001.MOV").path))
+        let moved = root.appendingPathComponent("Inbox/2020/IMG_0001.MOV")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moved.path))
     }
 
     func testLivePhotoMotionMoveIsRejectedWhenItsDateChanged() async throws {

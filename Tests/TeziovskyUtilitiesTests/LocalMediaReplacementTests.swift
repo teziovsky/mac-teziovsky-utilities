@@ -29,7 +29,8 @@ final class LocalMediaReplacementTests: XCTestCase {
         let url = root.appendingPathComponent(name)
         try Data([1, 2, 3]).write(to: url)
         if let marker {
-            LocalMediaConverter.markConverted(url, destination: root.appendingPathComponent(marker))
+            let value = Array(marker.utf8)
+            XCTAssertEqual(setxattr(url.path, "com.teziovsky.utilities.converted-media", value, value.count, 0, 0), 0)
         }
         return url
     }
@@ -120,7 +121,8 @@ final class LocalMediaReplacementTests: XCTestCase {
         let original = try write("Mia.mp4")
         let probe = root.appendingPathComponent("mia.MP4")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: probe.path), "case-sensitive volume")
-        LocalMediaConverter.markConverted(original, destination: probe)
+        let value = Array("mia.MP4".utf8)
+        XCTAssertEqual(setxattr(original.path, "com.teziovsky.utilities.converted-media", value, value.count, 0, 0), 0)
 
         let pairs = try await scan(["mp4"]).replaceablePairs
 

@@ -21,7 +21,7 @@ enum LocalMediaReplacementError: LocalizedError {
     case notPlayable
     case noDecodableFrame
     case durationMismatch
-    case incompleteImage
+    case incompleteFile
     case incompleteVideo
 
     var errorDescription: String? {
@@ -33,7 +33,7 @@ enum LocalMediaReplacementError: LocalizedError {
         case .notPlayable: return "The converted copy isn't playable"
         case .noDecodableFrame: return "The converted copy's video doesn't decode"
         case .durationMismatch: return "The converted copy's duration doesn't match the original's"
-        case .incompleteImage: return "The converted copy is incomplete"
+        case .incompleteFile: return "The converted copy is incomplete"
         case .incompleteVideo: return "The converted copy's video doesn't decode to the end"
         }
     }
@@ -138,7 +138,7 @@ struct LocalMediaReplacer {
         // gray), so the file's own structure has to show that it is all there.
         guard let data = try? Data(contentsOf: copy, options: .mappedIfSafe),
               ImageFileCompleteness.isComplete(data, type: CGImageSourceGetType(source) as String?) else {
-            throw LocalMediaReplacementError.incompleteImage
+            throw LocalMediaReplacementError.incompleteFile
         }
         guard copySize == originalSize else {
             throw LocalMediaReplacementError.sizeMismatch(copy: copySize, original: originalSize)
@@ -171,8 +171,14 @@ struct LocalMediaReplacer {
         }
         // A file cut short whose movie header comes first still plays and reports its full
         // duration: only decoding a frame near the end shows the media data is all there.
-        guard let copyDuration = await readableDuration(of: copyAsset),
-              await decodesFrameNearTheEnd(copyAsset, duration: copyDuration) else {
+        guard await decodesFrameNearTheEnd(copyAsset) else {
+            throw LocalMediaReplacementError.incompleteVideo
+        }
+        // The last half second could still be cut off: the top-level boxes must fill the file exactly.
+        guard MovieFileCompleteness.isComplete(copy) else {
+            throw LocalMediaReplacementError.incompleteFile
+        }
+        guard let copyDuration = await readableDuration(of: copyAsset) else {
             throw LocalMediaReplacementError.incompleteVideo
         }
         // Many originals were converted precisely because AVFoundation can't read them (legacy
@@ -185,13 +191,18 @@ struct LocalMediaReplacer {
         }
     }
 
-    /// Decodes the exact frame half a second before the end. Zero tolerance matters: with any
-    /// tolerance the generator may hand back an earlier keyframe from the intact part of the file.
-    private static func decodesFrameNearTheEnd(_ asset: AVURLAsset, duration: Double) async -> Bool {
+    /// Decodes the exact frame half a second before the video track ends (not the asset, whose
+    /// audio may run longer). Zero tolerance matters: with any tolerance the generator may hand
+    /// back an earlier keyframe from the intact part of the file.
+    private static func decodesFrameNearTheEnd(_ asset: AVURLAsset) async -> Bool {
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let range = try? await track.load(.timeRange),
+              range.isValid, range.duration.isNumeric else { return false }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        let time = CMTime(seconds: max(0, duration - 0.5), preferredTimescale: 600)
+        let nearEnd = CMTimeSubtract(CMTimeRangeGetEnd(range), CMTime(seconds: 0.5, preferredTimescale: 600))
+        let time = CMTimeMaximum(range.start, nearEnd)
         return (try? await generator.image(at: time)) != nil
     }
 
@@ -250,14 +261,21 @@ enum ImageFileCompleteness {
         return length >= 2 ? length : nil
     }
 
-    /// Entropy-coded data runs until a marker that is neither a stuffed 0xFF00 nor a restart; nil
-    /// when the file ends first.
+    /// Entropy-coded data runs until a marker that is neither a stuffed 0xFF00 nor a restart (both
+    /// may follow a run of 0xFF fill bytes); nil when the file ends first.
     private static func endOfScanData(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int) -> Int? {
         var index = start
-        while index + 1 < bytes.count {
-            let next = bytes[index + 1]
-            if bytes[index] == 0xFF, next != 0x00, !(0xD0...0xD7).contains(next) { return index }
-            index += 1
+        while index < bytes.count {
+            guard bytes[index] == 0xFF else {
+                index += 1
+                continue
+            }
+            var markerIndex = index + 1
+            while markerIndex < bytes.count, bytes[markerIndex] == 0xFF { markerIndex += 1 }
+            guard markerIndex < bytes.count else { return nil }
+            let marker = bytes[markerIndex]
+            if marker != 0x00, !(0xD0...0xD7).contains(marker) { return index }
+            index = markerIndex + 1
         }
         return nil
     }
@@ -266,5 +284,52 @@ enum ImageFileCompleteness {
     static func pngIsComplete(_ data: Data) -> Bool {
         let iend: [UInt8] = [0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]
         return data.count >= 8 + iend.count && Array(data.suffix(iend.count)) == iend
+    }
+}
+
+/// Whether an MP4 or QuickTime file is whole: its top-level boxes, each declaring its own size,
+/// must add up to exactly the file's length. Other containers count as complete.
+enum MovieFileCompleteness {
+    private static let checkedExtensions: Set<String> = ["mp4", "mov", "m4v"]
+
+    static func isComplete(_ url: URL) -> Bool {
+        guard checkedExtensions.contains(url.pathExtension.lowercased()) else { return true }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let fileLength = try? handle.seekToEnd() else { return false }
+        var offset: UInt64 = 0
+        while offset < fileLength {
+            guard fileLength - offset >= 8,
+                  (try? handle.seek(toOffset: offset)) != nil,
+                  let header = try? handle.read(upToCount: 16), header.count >= 8 else { return false }
+            guard let length = boxLength(header, remaining: fileLength - offset) else { return false }
+            offset += length
+        }
+        return offset == fileLength
+    }
+
+    /// The box's length from its header, or nil when it is impossible or runs past the file. A
+    /// size of 0 means the box runs to the end; 1 means a 64-bit size follows the type.
+    private static func boxLength(_ header: Data, remaining: UInt64) -> UInt64? {
+        let length: UInt64
+        switch UInt64(bigEndian: header.prefix(4)) {
+        case 0:
+            return remaining
+        case 1:
+            guard header.count == 16 else { return nil }
+            length = UInt64(bigEndian: header.dropFirst(8))
+            guard length >= 16 else { return nil }
+        case let size:
+            guard size >= 8 else { return nil }
+            length = size
+        }
+        return length <= remaining ? length : nil
+    }
+}
+
+private extension UInt64 {
+    /// A big-endian unsigned integer from up to eight bytes.
+    init<Bytes: Collection>(bigEndian bytes: Bytes) where Bytes.Element == UInt8 {
+        self = bytes.reduce(0) { $0 << 8 | UInt64($1) }
     }
 }

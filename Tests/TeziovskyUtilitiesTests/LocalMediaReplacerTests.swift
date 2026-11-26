@@ -402,4 +402,82 @@ final class LocalMediaReplacerVerifyTests: XCTestCase {
         let error = await verifyError(pair(original, copy, isVideo: true))
         XCTAssertEqual(error, "The converted copy isn't playable")
     }
+
+    func testVideoWithAudioRunningPastItsVideoPasses() async throws {
+        let original = root.appendingPathComponent("Clip.mov")
+        try await TestVideoFactory.makeVideo(at: original, seconds: 1, audioSeconds: 3)
+        let copy = root.appendingPathComponent("Clip.mp4")
+        try await TestVideoFactory.makeVideo(
+            at: copy, seconds: 1, fileType: .mp4, optimizeForNetworkUse: true, audioSeconds: 3
+        )
+
+        let error = await verifyError(pair(original, copy, isVideo: true))
+        XCTAssertNil(error)
+    }
+
+    func testVideoCopyCutInItsLastBytesFails() async throws {
+        let original = root.appendingPathComponent("Clip.mp4")
+        try await TestVideoFactory.makeVideo(at: original, seconds: 4, fileType: .mp4, optimizeForNetworkUse: true)
+        let data = try Data(contentsOf: original)
+        let copy = root.appendingPathComponent("Clip-converted.mp4")
+        try data.prefix(data.count * 95 / 100).write(to: copy)
+        let cutError = await verifyError(pair(original, copy, isVideo: true))
+        XCTAssertNotNil(cutError, "cut to 95%")
+        // Only the last frame's bytes missing: the frame half a second before the end still
+        // decodes, so the box sizes are what catches it.
+        try data.prefix(data.count - 16).write(to: copy)
+
+        let error = await verifyError(pair(original, copy, isVideo: true))
+        XCTAssertEqual(error, "The converted copy is incomplete")
+        let intactError = await verifyError(pair(copy, original, isVideo: true))
+        XCTAssertNil(intactError)
+    }
+}
+
+final class ImageFileCompletenessTests: XCTestCase {
+    /// SOI, a minimal scan header, scan data, then EOI.
+    private func jpeg(scanData: [UInt8]) -> Data {
+        Data([0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02] + scanData + [0xFF, 0xD9])
+    }
+
+    func testRestartMarkerAfterFillBytesStaysInsideTheScan() {
+        XCTAssertTrue(ImageFileCompleteness.jpegIsComplete(jpeg(scanData: [0x12, 0xFF, 0xFF, 0xD0, 0x34])))
+        XCTAssertTrue(ImageFileCompleteness.jpegIsComplete(jpeg(scanData: [0x12, 0xFF, 0x00, 0xFF, 0xD7, 0x34])))
+    }
+
+    func testFillBytesBeforeTheEndMarkerAreAccepted() {
+        let scanStart: [UInt8] = [0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02, 0x12]
+        XCTAssertTrue(ImageFileCompleteness.jpegIsComplete(Data(scanStart + [0xFF, 0xFF, 0xD9])))
+    }
+
+    func testScanCutOffIsIncomplete() {
+        let scanStart: [UInt8] = [0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02, 0x12]
+        XCTAssertFalse(ImageFileCompleteness.jpegIsComplete(Data(scanStart + [0xFF, 0xFF, 0xD0])))
+        XCTAssertFalse(ImageFileCompleteness.jpegIsComplete(Data(scanStart + [0x34])))
+    }
+}
+
+final class MovieFileCompletenessTests: XCTestCase {
+    private func isComplete(_ bytes: [UInt8]) throws -> Bool {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Boxes-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data(bytes).write(to: url)
+        return MovieFileCompleteness.isComplete(url)
+    }
+
+    private let ftyp: [UInt8] = [0, 0, 0, 12] + Array("ftyp".utf8) + [1, 2, 3, 4]
+    /// A box with a 64-bit size of 24: size field 1, type, largesize, then 8 bytes of payload.
+    private let largeMdat: [UInt8] = [0, 0, 0, 1] + Array("mdat".utf8)
+        + [0, 0, 0, 0, 0, 0, 0, 24] + [UInt8](repeating: 7, count: 8)
+
+    func testBoxesThatFillTheFileAreComplete() throws {
+        XCTAssertTrue(try isComplete(ftyp + largeMdat))
+        XCTAssertTrue(try isComplete(ftyp + [0, 0, 0, 0] + Array("mdat".utf8) + [9, 9, 9]))
+    }
+
+    func testCutOrPaddedBoxesAreIncomplete() throws {
+        XCTAssertFalse(try isComplete(ftyp + largeMdat.dropLast()))
+        XCTAssertFalse(try isComplete(ftyp + largeMdat + [0]))
+        XCTAssertFalse(try isComplete(Array(ftyp.dropLast())))
+    }
 }

@@ -10,7 +10,8 @@ enum TestVideoFactory {
         fileType: AVFileType = .mov,
         codec: AVVideoCodecType = .h264,
         metadata: [AVMetadataItem] = [],
-        optimizeForNetworkUse: Bool = false
+        optimizeForNetworkUse: Bool = false,
+        audioSeconds: Int? = nil
     ) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
@@ -35,10 +36,16 @@ enum TestVideoFactory {
             ]
         )
         writer.add(input)
+        // AAC silence, which may run longer than the video.
+        let audio = audioSeconds.map { _ in makeAudioInput(format: kAudioFormatMPEG4AAC) }
+        if let audio { writer.add(audio) }
         guard writer.startWriting() else {
             throw writer.error ?? CocoaError(.fileWriteUnknown)
         }
         writer.startSession(atSourceTime: .zero)
+        if let audio, let audioSeconds {
+            try await appendSilence(to: audio, seconds: audioSeconds)
+        }
 
         let framesPerSecond: Int32 = 10
         for frame in 0...(Int32(seconds) * framesPerSecond) {
@@ -94,7 +101,7 @@ enum TestVideoFactory {
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: description)
         input.expectsMediaDataInRealTime = false
         writer.add(input)
-        let audio = pcmAudio ? makePCMAudioInput() : nil
+        let audio = pcmAudio ? makeAudioInput(format: kAudioFormatLinearPCM) : nil
         if let audio { writer.add(audio) }
         guard reader.startReading(), writer.startWriting() else {
             throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
@@ -144,16 +151,15 @@ enum TestVideoFactory {
         return result
     }
 
-    private static func makePCMAudioInput() -> AVAssetWriterInput {
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 8000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false
-        ])
+    private static func makeAudioInput(format: AudioFormatID) -> AVAssetWriterInput {
+        var settings: [String: Any] = [AVFormatIDKey: format, AVSampleRateKey: 8000, AVNumberOfChannelsKey: 1]
+        if format == kAudioFormatLinearPCM {
+            settings[AVLinearPCMBitDepthKey] = 16
+            settings[AVLinearPCMIsFloatKey] = false
+            settings[AVLinearPCMIsBigEndianKey] = false
+            settings[AVLinearPCMIsNonInterleaved] = false
+        }
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
         return input
     }

@@ -5,7 +5,7 @@ struct DroneModeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var pendingDestructiveStep: DroneFinalizeStep?
 
-    private var workflow: DroneWorkflowCoordinator { appState.droneWorkflow }
+    @ObservedObject var workflow: DroneWorkflowCoordinator
     private var finalizer: DroneFinalizer { workflow.finalizer }
     private var config: DroneFinalizeConfig { AppSettings.droneFinalizeConfig }
 

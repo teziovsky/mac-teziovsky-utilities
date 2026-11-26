@@ -22,7 +22,13 @@ enum DroneExportScanner {
         let exportDir = projectDirectory.appendingPathComponent(config.exportDirectoryName, isDirectory: true)
         let files = try DroneMediaPaths.regularFiles(relativeTo: exportDir)
         let suffix = config.normalizedSuffix
-        let fileSet = Set(files.map { $0.lowercased() })
+        // Compressed copies keyed without extension: a copy made with another output
+        // container (e.g. .mkv after switching from .mp4) still counts as compressed.
+        let compressedBases = Set(files.compactMap { relativePath -> String? in
+            let fileName = (relativePath as NSString).lastPathComponent
+            guard DroneFinalizePlanBuilder.hasCompressedSuffix(fileName, suffix: suffix) else { return nil }
+            return (relativePath as NSString).deletingPathExtension.lowercased()
+        })
 
         return files.compactMap { relativePath in
             let fileName = (relativePath as NSString).lastPathComponent
@@ -31,7 +37,9 @@ enum DroneExportScanner {
             guard !DroneFinalizePlanBuilder.hasCompressedSuffix(fileName, suffix: suffix) else { return nil }
 
             let compressedRelative = compressedRelativePath(for: relativePath, config: config)
-            if fileSet.contains(compressedRelative.lowercased()) { return nil }
+            if compressedBases.contains((compressedRelative as NSString).deletingPathExtension.lowercased()) {
+                return nil
+            }
 
             let url = exportDir.appendingPathComponent(relativePath)
             let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init)

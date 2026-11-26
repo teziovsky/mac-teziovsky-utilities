@@ -314,25 +314,29 @@ enum AppSettings {
         }
     }
 
+    /// The chosen export folder. The security-scoped bookmark wins over the stored path: it
+    /// follows the folder when it is moved and is the only form that grants access in a
+    /// sandboxed build. Callers start/stop access themselves (see `ExportDirectoryAccess`).
     static func resolveExportDirectory() -> URL? {
-        if let url = exportDirectoryURL, FileManager.default.fileExists(atPath: url.path) {
-            _ = url.startAccessingSecurityScopedResource()
-            return url
+        if let data = UserDefaults.standard.data(forKey: exportDirectoryBookmarkKey) {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                if isStale || url.path != exportDirectoryPath {
+                    let didAccess = url.startAccessingSecurityScopedResource()
+                    setExportDirectory(url)
+                    if didAccess { url.stopAccessingSecurityScopedResource() }
+                }
+                return url
+            }
         }
-        guard let data = UserDefaults.standard.data(forKey: exportDirectoryBookmarkKey) else {
-            return exportDirectoryURL
+        guard let url = exportDirectoryURL, FileManager.default.fileExists(atPath: url.path) else {
+            return nil
         }
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
-            return exportDirectoryURL
-        }
-        _ = url.startAccessingSecurityScopedResource()
-        exportDirectoryPath = url.path
         return url
     }
 }

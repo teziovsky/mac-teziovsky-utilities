@@ -153,7 +153,8 @@ final class DroneWorkflowCoordinator: ObservableObject {
             projectDirectory: projectDirectory,
             exports: uncompressedExports,
             config: config,
-            preset: selectedPreset
+            preset: selectedPreset,
+            importGUIPresets: presetLoader.includesGUIPresets
         )
     }
 

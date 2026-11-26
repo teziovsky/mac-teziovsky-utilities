@@ -36,11 +36,11 @@ Compression runs HandBrakeCLI with per-file progress and ETA. Output is written 
 
 Choose a folder to scan supported media recursively. Hidden entries, packages, and symbolic links are skipped. Nothing changes during scanning. The workflow separately previews media conversion, date repairs, and file organization, and only applies a step after explicit confirmation.
 
-HEIC/HEIF images can be converted to JPEG at maximum quality. Legacy or unsupported videos can be re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
+HEIC/HEIF images can be converted to JPEG at maximum quality. Videos in old containers (M4V, 3GP, MTS, …) that already use modern streams are rewrapped into MP4/MOV without re-encoding; videos with legacy codecs are re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Videos macOS cannot read (e.g. MKV, WMV, FLV, WebM) are listed as unsupported instead of failing mid-conversion, and a file that already has its converted twin next to it is not converted again. Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
 
 For date repair, the app compares Finder Created, Finder Modified, and available EXIF, TIFF, or video-container dates. EXIF dates are read together with their `OffsetTime*` fields, so photos taken in another time zone are not shifted. Placeholder timestamps from zeroed fields or reset clocks (1904, 1970 and 1980 epochs, midnight on 1 January 2000/2001) are ignored. Files whose dates do not all match the oldest valid date are listed with the current date, proposed date, and source. Repair synchronizes those dates to the oldest valid date found. Image metadata is rewritten without re-encoding (pixels stay identical) and existing offsets are kept. The original file is backed up during each repair so a failed metadata rewrite can be rolled back.
 
-For organization, each file uses that same oldest valid date. Photos move to `CURRENT_PARENT/YYYY/`; videos move to `CURRENT_PARENT/YYYY/_Filmy/`. The motion part of a Live Photo (a `.MOV` with the same name as a HEIC/JPEG in the same folder) stays next to its still and keeps the still's final name. Files already in the computed destination are skipped. A file under an incorrect year moves to the correct sibling year. Existing destination names are preserved by numbering the incoming file, for example `photo (1).jpg`. Empty source folders are left in place. Supported extensions are editable in Settings → Local Media.
+For organization, each file uses that same oldest valid date. Photos move to `CURRENT_PARENT/YYYY/`; videos move to `CURRENT_PARENT/YYYY/_Filmy/`. The motion part of a Live Photo (a `.MOV` with the same name as a HEIC/JPEG in the same folder) stays next to its still and keeps the still's final name. Files already in the computed destination are skipped. A file under an incorrect year moves to the correct sibling year; if that sibling lies outside the scanned folder, the file is reported instead. Only 4-digit names from 1900 to next year count as year folders. Scans also report backups and temporary files left by an interrupted repair. Existing destination names are preserved by numbering the incoming file, for example `photo (1).jpg`. Empty source folders are left in place. Supported extensions are editable in Settings → Local Media.
 
 ### First launch
 
@@ -113,7 +113,7 @@ Set your development team in Xcode for signed release builds outside this repo (
 
 ## Settings
 
-- **Excluded album suffix** — albums whose names end with this suffix are hidden (default: `_zgrane`)
+- **Excluded album suffix** — albums whose names end with this suffix are hidden (default: `_zgrane`); organized items move to `<album><suffix>`, so Organize is disabled while it is empty
 - **Omit from Organize** — hide albums from the sidebar and disable Organize for them
 - **Export folder** — destination for the Organize action
 - **Export edited versions when available** — export the edited render (default) or the unmodified original

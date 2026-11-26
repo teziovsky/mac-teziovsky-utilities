@@ -7,109 +7,117 @@ actor ThumbnailLoader {
     static let shared = ThumbnailLoader()
 
     private let imageManager = PHImageManager.default()
-    private var memoryCache: [String: NSImage] = [:]
+    /// Bounded: a 10 000-item album must not keep every decoded thumbnail alive.
+    private let memoryCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 256 * 1024 * 1024
+        return cache
+    }()
     private let thumbnailSize = CGSize(width: 400, height: 400)
     private let requestTimeoutSeconds: UInt64 = 12
     private let maxDiskCacheBytes: Int64 = 500 * 1024 * 1024
+    /// The disk cache is trimmed after this much new data, not after every single thumbnail.
+    private let pruneEveryBytes: Int64 = 32 * 1024 * 1024
+    private var bytesWrittenSincePrune: Int64 = .max
+    private let customCacheRoot: URL?
+
+    init(cacheRoot: URL? = nil) {
+        customCacheRoot = cacheRoot
+    }
 
     private var cacheRoot: URL {
+        if let customCacheRoot { return customCacheRoot }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("TeziovskyUtilities/Thumbnails", isDirectory: true)
     }
 
     func cachedImage(for itemID: String) -> NSImage? {
-        memoryCache[itemID]
+        memoryCache.object(forKey: itemID as NSString)
     }
 
     func thumbnail(for item: MediaItem, album: PhotoAlbum, asset: PHAsset?) async -> NSImage? {
-        if let cached = memoryCache[item.id] {
+        if let cached = memoryCache.object(forKey: item.id as NSString) {
             return cached
         }
 
         let diskPath = diskCacheURL(album: album, itemID: item.id)
         if FileManager.default.fileExists(atPath: diskPath.path),
            let image = NSImage(contentsOf: diskPath) {
-            memoryCache[item.id] = image
+            remember(image, for: item.id)
             return image
         }
 
         guard let asset else { return nil }
 
         let image = await requestImage(for: asset)
-        guard let image else { return nil }
+        guard let image, !Task.isCancelled else { return image }
 
-        memoryCache[item.id] = image
-        try? saveToDisk(image: image, url: diskPath)
-        await pruneDiskCacheIfNeeded()
+        remember(image, for: item.id)
+        if let written = try? saveToDisk(image: image, url: diskPath) {
+            bytesWrittenSincePrune = bytesWrittenSincePrune == .max ? written : bytesWrittenSincePrune + written
+        }
+        if bytesWrittenSincePrune >= pruneEveryBytes {
+            bytesWrittenSincePrune = 0
+            await pruneDiskCacheIfNeeded()
+        }
         return image
     }
 
     func clearMemoryCache() {
-        memoryCache.removeAll()
+        memoryCache.removeAllObjects()
     }
 
-    func clearMemoryCache(forAlbumID albumID: String) async {
-        memoryCache.removeAll()
-        await pruneAlbumDiskCache(albumID: albumID)
+    /// Called when an album is selected. Only frees memory: the album's disk cache is what
+    /// makes re-opening it fast, so it is kept.
+    func clearMemoryCache(forAlbumID albumID: String) {
+        memoryCache.removeAllObjects()
+    }
+
+    private func remember(_ image: NSImage, for itemID: String) {
+        let pixels = image.representations.first.map { $0.pixelsWide * $0.pixelsHigh } ?? 0
+        let cost = max(pixels, Int(image.size.width * image.size.height)) * 4
+        memoryCache.setObject(image, forKey: itemID as NSString, cost: cost)
     }
 
     private func requestImage(for asset: PHAsset) async -> NSImage? {
-        await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .opportunistic
-            options.resizeMode = .fast
-            options.isNetworkAccessAllowed = true
-            options.isSynchronous = false
+        let request = ImageRequest(imageManager: imageManager)
+        let timeout = requestTimeoutSeconds
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                request.start(continuation)
+                let options = PHImageRequestOptions()
+                options.deliveryMode = .opportunistic
+                options.resizeMode = .fast
+                options.isNetworkAccessAllowed = true
+                options.isSynchronous = false
 
-            var resumed = false
-            let resumeOnce: (NSImage?) -> Void = { image in
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: image)
-            }
-
-            let requestID = imageManager.requestImage(
-                for: asset,
-                targetSize: thumbnailSize,
-                contentMode: .aspectFit,
-                options: options
-            ) { image, info in
-                if let error = info?[PHImageErrorKey] as? Error {
-                    resumeOnce(nil)
-                    _ = error
-                    return
+                let requestID = imageManager.requestImage(
+                    for: asset,
+                    targetSize: thumbnailSize,
+                    contentMode: .aspectFit,
+                    options: options
+                ) { image, info in
+                    if info?[PHImageErrorKey] != nil || (info?[PHImageCancelledKey] as? Bool) == true {
+                        request.finish(nil)
+                        return
+                    }
+                    if (info?[PHImageResultIsDegradedKey] as? Bool) ?? false { return }
+                    request.finish(image)
                 }
-                if (info?[PHImageCancelledKey] as? Bool) == true {
-                    resumeOnce(nil)
-                    return
-                }
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if isDegraded { return }
-                resumeOnce(image)
+                request.attach(requestID: requestID, timeoutSeconds: timeout)
             }
-
-            Task {
-                try? await Task.sleep(nanoseconds: requestTimeoutSeconds * 1_000_000_000)
-                if !resumed {
-                    imageManager.cancelImageRequest(requestID)
-                    resumeOnce(nil)
-                }
-            }
+        } onCancel: {
+            // The grid cell scrolled away: stop the PhotoKit request instead of finishing it.
+            request.cancel()
         }
     }
 
-    private func diskCacheURL(album: PhotoAlbum, itemID: String) -> URL {
+    func diskCacheURL(album: PhotoAlbum, itemID: String) -> URL {
         let albumHash = SHA256.hash(data: Data(album.id.utf8)).compactMap { String(format: "%02x", $0) }.joined().prefix(16)
         let safeItemID = itemID.replacingOccurrences(of: "/", with: "_")
         let dir = cacheRoot.appendingPathComponent(String(albumHash), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("\(safeItemID).jpg")
-    }
-
-    private func pruneAlbumDiskCache(albumID: String) async {
-        let albumHash = SHA256.hash(data: Data(albumID.utf8)).compactMap { String(format: "%02x", $0) }.joined().prefix(16)
-        let dir = cacheRoot.appendingPathComponent(String(albumHash), isDirectory: true)
-        try? FileManager.default.removeItem(at: dir)
     }
 
     private func pruneDiskCacheIfNeeded() async {
@@ -149,12 +157,73 @@ actor ThumbnailLoader {
         }
     }
 
-    private func saveToDisk(image: NSImage, url: URL) throws {
+    /// Writes the thumbnail and returns the number of bytes written.
+    private func saveToDisk(image: NSImage, url: URL) throws -> Int64 {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
-            return
+            return 0
         }
         try jpeg.write(to: url)
+        return Int64(jpeg.count)
+    }
+}
+
+/// One PhotoKit image request whose continuation is resumed exactly once, whether it
+/// finishes, times out or is cancelled (these arrive on different threads).
+private final class ImageRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private let imageManager: PHImageManager
+    private var continuation: CheckedContinuation<NSImage?, Never>?
+    private var requestID: PHImageRequestID?
+    private var timeoutTask: Task<Void, Never>?
+    private var isCancelled = false
+
+    init(imageManager: PHImageManager) {
+        self.imageManager = imageManager
+    }
+
+    func start(_ continuation: CheckedContinuation<NSImage?, Never>) {
+        lock.lock()
+        let cancelledEarly = isCancelled
+        if !cancelledEarly { self.continuation = continuation }
+        lock.unlock()
+        if cancelledEarly { continuation.resume(returning: nil) }
+    }
+
+    func attach(requestID: PHImageRequestID, timeoutSeconds: UInt64) {
+        lock.lock()
+        self.requestID = requestID
+        let shouldCancel = isCancelled
+        // PhotoKit may already have answered synchronously from its cache.
+        if !shouldCancel, continuation != nil {
+            timeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self?.cancel()
+            }
+        }
+        lock.unlock()
+        if shouldCancel { imageManager.cancelImageRequest(requestID) }
+    }
+
+    func finish(_ image: NSImage?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        let timeout = timeoutTask
+        timeoutTask = nil
+        lock.unlock()
+        timeout?.cancel()
+        pending?.resume(returning: image)
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        let id = requestID
+        lock.unlock()
+        if let id { imageManager.cancelImageRequest(id) }
+        finish(nil)
     }
 }

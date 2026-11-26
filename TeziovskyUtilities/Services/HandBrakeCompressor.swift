@@ -71,12 +71,22 @@ enum HandBrakeCompressorError: LocalizedError {
 
 enum HandBrakeCompressor {
     static func listPresets(cliURL: URL) async throws -> [String] {
-        let output = try await runCLI(
+        try await presetList(cliURL: cliURL).names
+    }
+
+    /// Lists presets including the user's own presets from HandBrake.app
+    /// (`--preset-import-gui`), falling back to built-in presets if that import fails.
+    static func presetList(cliURL: URL) async throws -> (names: [String], includesGUIPresets: Bool) {
+        if let output = try? await runCLI(
             executable: cliURL,
-            arguments: ["--preset-list"],
+            arguments: ["--preset-import-gui", "--preset-list"],
             failureLabel: nil
-        )
-        return parsePresetNames(from: output)
+        ) {
+            let names = parsePresetNames(from: output)
+            if !names.isEmpty { return (names, true) }
+        }
+        let output = try await runCLI(executable: cliURL, arguments: ["--preset-list"], failureLabel: nil)
+        return (parsePresetNames(from: output), false)
     }
 
     /// Encodes `inputURL` into a hidden `.partial` sibling and moves it to `outputURL` only after
@@ -87,6 +97,7 @@ enum HandBrakeCompressor {
         inputURL: URL,
         outputURL: URL,
         preset: String,
+        importGUIPresets: Bool = false,
         onProgress: @escaping @Sendable (HandBrakeFileProgress) -> Void = { _ in }
     ) async throws {
         let fileManager = FileManager.default
@@ -98,7 +109,7 @@ enum HandBrakeCompressor {
         do {
             _ = try await runCLI(
                 executable: cliURL,
-                arguments: [
+                arguments: (importGUIPresets ? ["--preset-import-gui"] : []) + [
                     "--input", inputURL.path,
                     "--output", partialURL.path,
                     "--preset", preset
@@ -141,6 +152,25 @@ enum HandBrakeCompressor {
                 let names = presetList.compactMap { $0["PresetName"] as? String }
                 if !names.isEmpty { return names.sorted() }
             }
+        }
+
+        // HandBrakeCLI 1.x: unindented `Category/` lines, presets one level in, and wrapped
+        // descriptions deeper still. Banner and log lines are unindented too and are skipped.
+        let lines = output.split(whereSeparator: \.isNewline).map(String.init)
+        let isCategory: (String) -> Bool = { line in
+            !line.hasPrefix(" ") && !line.hasPrefix("\t") && line.trimmingCharacters(in: .whitespaces).hasSuffix("/")
+        }
+        if lines.contains(where: isCategory) {
+            let indents = lines
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { $0.prefix { $0 == " " || $0 == "\t" }.count }
+                .filter { $0 > 0 }
+            guard let presetIndent = indents.min() else { return [] }
+            return lines
+                .filter { $0.prefix { $0 == " " || $0 == "\t" }.count == presetIndent }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !$0.hasSuffix("/") }
+                .sorted()
         }
 
         return output
@@ -297,7 +327,8 @@ final class HandBrakeCompressionSession: ObservableObject {
         projectDirectory: URL,
         exports: [DroneUncompressedExport],
         config: DroneFinalizeConfig,
-        preset: String
+        preset: String,
+        importGUIPresets: Bool = false
     ) {
         cancel()
         failures = []
@@ -356,6 +387,7 @@ final class HandBrakeCompressionSession: ObservableObject {
                         inputURL: inputURL,
                         outputURL: outputURL,
                         preset: preset,
+                        importGUIPresets: importGUIPresets,
                         onProgress: progressHandler(runID: runID, fileIndex: index + 1)
                     )
                 } catch is CancellationError {
@@ -398,6 +430,8 @@ final class HandBrakePresetLoader: ObservableObject {
     @Published private(set) var presets: [String] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    /// Whether `presets` includes HandBrake.app's user presets, which encodes must then import too.
+    private(set) var includesGUIPresets = false
 
     func load(config: DroneFinalizeConfig) {
         isLoading = true
@@ -410,10 +444,13 @@ final class HandBrakePresetLoader: ObservableObject {
                 return
             }
             do {
-                presets = try await HandBrakeCompressor.listPresets(cliURL: cliURL)
+                let list = try await HandBrakeCompressor.presetList(cliURL: cliURL)
+                presets = list.names
+                includesGUIPresets = list.includesGUIPresets
             } catch {
                 errorMessage = error.localizedDescription
                 presets = []
+                includesGUIPresets = false
             }
         }
     }

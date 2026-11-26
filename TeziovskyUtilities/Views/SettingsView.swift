@@ -25,37 +25,51 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             PhotosSettingsTab(
-                excludedSuffix: $excludedSuffix,
+                excludedSuffix: persisted($excludedSuffix) { AppSettings.excludedAlbumSuffix = $0 },
                 omittedAlbumIDs: $omittedAlbumIDs,
-                organizeByYearEnabled: $organizeByYearEnabled
+                organizeByYearEnabled: persisted($organizeByYearEnabled) { AppSettings.organizeByYearEnabled = $0 }
             )
             .tabItem {
                 Label("Photos", systemImage: "photo.on.rectangle.angled")
             }
 
             DroneSettingsTab(
-                compressedSuffix: $droneCompressedSuffix,
-                rawDirectoryName: $droneRawDirectoryName,
-                exportDirectoryName: $droneExportDirectoryName,
-                verticalDirectoryName: $droneVerticalDirectoryName,
-                horizontalDirectoryName: $droneHorizontalDirectoryName,
-                handBrakeCLIPath: $droneHandBrakeCLIPath,
-                resolveAppPath: $droneResolveAppPath,
-                handBrakeOutputExtension: $droneHandBrakeOutputExtension,
-                keepRawAfterFinalize: $droneKeepRawAfterFinalize,
-                preserveOrientationOnFlatten: $dronePreserveOrientationOnFlatten
+                compressedSuffix: persisted($droneCompressedSuffix) { AppSettings.droneCompressedSuffix = $0 },
+                rawDirectoryName: persisted($droneRawDirectoryName) { AppSettings.droneRawDirectoryName = $0 },
+                exportDirectoryName: persisted($droneExportDirectoryName) { AppSettings.droneExportDirectoryName = $0 },
+                verticalDirectoryName: persisted($droneVerticalDirectoryName) {
+                    AppSettings.droneVerticalDirectoryName = $0
+                },
+                horizontalDirectoryName: persisted($droneHorizontalDirectoryName) {
+                    AppSettings.droneHorizontalDirectoryName = $0
+                },
+                handBrakeCLIPath: persisted($droneHandBrakeCLIPath) { AppSettings.droneHandBrakeCLIPath = $0 },
+                resolveAppPath: persisted($droneResolveAppPath) { AppSettings.droneResolveAppPath = $0 },
+                handBrakeOutputExtension: persisted($droneHandBrakeOutputExtension) {
+                    AppSettings.droneHandBrakeOutputExtension = $0
+                },
+                keepRawAfterFinalize: persisted($droneKeepRawAfterFinalize) {
+                    AppSettings.droneKeepRawAfterFinalize = $0
+                },
+                preserveOrientationOnFlatten: persisted($dronePreserveOrientationOnFlatten) {
+                    AppSettings.dronePreserveOrientationOnFlatten = $0
+                }
             )
             .tabItem {
                 Label("Drone", systemImage: "airplane")
             }
 
             LocalPhotosSettingsTab(
-                extensions: $localMediaExtensions,
-                convertHEIC: $convertHEIC,
-                convertLegacyVideos: $convertLegacyVideos,
-                keepOriginalsAfterConversion: $keepOriginalsAfterConversion,
-                videoOutputContainer: $localVideoOutputContainer,
-                videoCodec: $localVideoCodec
+                extensions: persisted($localMediaExtensions) { AppSettings.localMediaExtensions = $0 },
+                convertHEIC: persisted($convertHEIC) { AppSettings.localConvertHEIC = $0 },
+                convertLegacyVideos: persisted($convertLegacyVideos) { AppSettings.localConvertLegacyVideos = $0 },
+                keepOriginalsAfterConversion: persisted($keepOriginalsAfterConversion) {
+                    AppSettings.localKeepOriginalsAfterConversion = $0
+                },
+                videoOutputContainer: persisted($localVideoOutputContainer) {
+                    AppSettings.localVideoOutputContainer = $0
+                },
+                videoCodec: persisted($localVideoCodec) { AppSettings.localVideoCodec = $0 }
             )
                 .tabItem {
                     Label("Local Media", systemImage: "folder.badge.gearshape")
@@ -87,28 +101,24 @@ struct SettingsView: View {
         .onChange(of: omittedAlbumIDs) { _, newValue in
             appState.syncOmittedFromOrganizeAlbums(newValue)
         }
-        .onDisappear {
-            AppSettings.excludedAlbumSuffix = excludedSuffix
-            AppSettings.organizeByYearEnabled = organizeByYearEnabled
-            AppSettings.droneCompressedSuffix = droneCompressedSuffix
-            AppSettings.droneRawDirectoryName = droneRawDirectoryName
-            AppSettings.droneExportDirectoryName = droneExportDirectoryName
-            AppSettings.droneVerticalDirectoryName = droneVerticalDirectoryName
-            AppSettings.droneHorizontalDirectoryName = droneHorizontalDirectoryName
-            AppSettings.droneHandBrakeCLIPath = droneHandBrakeCLIPath
-            AppSettings.droneResolveAppPath = droneResolveAppPath
-            AppSettings.droneHandBrakeOutputExtension = droneHandBrakeOutputExtension
-            AppSettings.droneKeepRawAfterFinalize = droneKeepRawAfterFinalize
-            AppSettings.dronePreserveOrientationOnFlatten = dronePreserveOrientationOnFlatten
-            AppSettings.localMediaExtensions = localMediaExtensions
-            AppSettings.localConvertHEIC = convertHEIC
-            AppSettings.localConvertLegacyVideos = convertLegacyVideos
-            AppSettings.localKeepOriginalsAfterConversion = keepOriginalsAfterConversion
-            AppSettings.localVideoOutputContainer = localVideoOutputContainer
-            AppSettings.localVideoCodec = localVideoCodec
-            appState.syncOmittedFromOrganizeAlbums(omittedAlbumIDs)
-            Task { await appState.photosService.reloadAlbums() }
+        .task(id: excludedSuffix) {
+            // The suffix filters the sidebar; reload once typing pauses, not per keystroke.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            await appState.photosService.reloadAlbums()
         }
+    }
+
+    /// Settings apply immediately (not when the window closes), so an open Settings window
+    /// never leaves a scan or export running with stale values.
+    private func persisted<Value>(_ state: Binding<Value>, save: @escaping (Value) -> Void) -> Binding<Value> {
+        Binding(
+            get: { state.wrappedValue },
+            set: { newValue in
+                state.wrappedValue = newValue
+                save(newValue)
+            }
+        )
     }
 
     private func loadAlbumsIfNeeded() {

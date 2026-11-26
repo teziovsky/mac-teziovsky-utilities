@@ -8,6 +8,7 @@ enum TestVideoFactory {
         at url: URL,
         seconds: Int,
         fileType: AVFileType = .mov,
+        codec: AVVideoCodecType = .h264,
         metadata: [AVMetadataItem] = []
     ) async throws {
         try? FileManager.default.removeItem(at: url)
@@ -16,7 +17,7 @@ enum TestVideoFactory {
         let input = AVAssetWriterInput(
             mediaType: .video,
             outputSettings: [
-                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoCodecKey: codec,
                 AVVideoWidthKey: 64,
                 AVVideoHeightKey: 64
             ]

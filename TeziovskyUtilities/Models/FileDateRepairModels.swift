@@ -128,14 +128,24 @@ struct LocalMediaConversionConfig: Sendable, Equatable {
 enum LocalMediaConversionKind: Sendable, Equatable {
     case heicToJPEG
     case legacyVideo(LocalVideoOutputContainer, LocalVideoCodec)
+    case remuxVideo(LocalVideoOutputContainer)
 
     var label: String {
         switch self {
         case .heicToJPEG: return "HEIC → highest-quality JPEG"
         case .legacyVideo(let container, let codec):
             return "Legacy video → \(container.fileExtension.uppercased()) · \(codec.label)"
+        case .remuxVideo(let container):
+            return "Rewrap into \(container.fileExtension.uppercased()) — streams copied, no quality loss"
         }
     }
+}
+
+enum LocalMediaConversionPlan: Sendable, Equatable {
+    case convert(LocalMediaConversionItem)
+    case notNeeded
+    /// The file needs conversion but macOS cannot read it; the reason is shown to the user.
+    case unsupported(String)
 }
 
 struct LocalMediaConversionItem: Identifiable, Sendable, Equatable {
@@ -181,6 +191,14 @@ extension LocalMediaOrganizationItem {
             destinationWasRenamed: destination.lastPathComponent != destinationURL.lastPathComponent
         )
     }
+}
+
+enum LocalMediaOrganizationPlan: Sendable, Equatable {
+    case move(LocalMediaOrganizationItem)
+    /// Already in its computed destination, or no usable date.
+    case unchanged
+    /// Belongs in a sibling year folder outside the scanned folder.
+    case outsideScannedFolder(year: String)
 }
 
 struct LocalMediaOrganizationSummary: Sendable, Equatable {
@@ -300,31 +318,75 @@ enum LocalMediaOrganizationPlanner {
         groupsWithPhotos: Bool = false,
         now: Date = Date()
     ) -> LocalMediaOrganizationItem? {
+        let outcome = plan(
+            fileURL: fileURL,
+            relativePath: relativePath,
+            rootDirectory: rootDirectory,
+            evidence: evidence,
+            isVideo: isVideo,
+            groupsWithPhotos: groupsWithPhotos,
+            now: now
+        )
+        if case .move(let item) = outcome { return item }
+        return nil
+    }
+
+    static func plan(
+        fileURL: URL,
+        relativePath: String,
+        rootDirectory: URL,
+        evidence: [FileDateEvidence],
+        isVideo: Bool,
+        groupsWithPhotos: Bool = false,
+        now: Date = Date()
+    ) -> LocalMediaOrganizationPlan {
         guard let oldest = FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence, now: now) else {
-            return nil
+            return .unchanged
         }
 
         let year = yearString(for: oldest.date)
-        let parent = fileURL.deletingLastPathComponent()
+        // Live Photo motion files follow their still into the photo folder, not `_Filmy`.
+        guard let destinationDirectory = destinationDirectory(
+            for: fileURL.deletingLastPathComponent(),
+            year: year,
+            placesAsVideo: isVideo && !groupsWithPhotos
+        ) else {
+            return .unchanged
+        }
+        let destination = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+        guard destination.standardizedFileURL != fileURL.standardizedFileURL else {
+            return .unchanged
+        }
+        // The year folder the file sits in lies above the scanned folder; its correct sibling
+        // is out of reach. Report it instead of silently counting it as organized.
+        guard isWithinRoot(destination, rootDirectory: rootDirectory) else {
+            return .outsideScannedFolder(year: year)
+        }
+
+        return .move(LocalMediaOrganizationItem(
+            sourceURL: fileURL,
+            sourceRelativePath: relativePath,
+            destinationURL: destination,
+            destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
+            proposedDate: oldest.date,
+            proposedSource: oldest.source,
+            isVideo: isVideo,
+            destinationWasRenamed: false
+        ))
+    }
+
+    /// `PARENT/YYYY[/_Filmy]`, or the sibling year folder when the file already sits under a
+    /// year folder. nil when the file is already in the right year (and video) folder.
+    private static func destinationDirectory(for parent: URL, year: String, placesAsVideo: Bool) -> URL? {
         let anchor: URL
         var preservedDirectories: [String] = []
-        // Live Photo motion files follow their still into the photo folder, not `_Filmy`.
-        let placesAsVideo = isVideo && !groupsWithPhotos
         var prependVideoDirectory = placesAsVideo
 
         if let currentYearDirectory = nearestYearDirectory(startingAt: parent) {
-            preservedDirectories = relativeDirectoryComponents(
-                from: currentYearDirectory,
-                to: parent
-            )
+            preservedDirectories = relativeDirectoryComponents(from: currentYearDirectory, to: parent)
             let isInVideoDirectory = preservedDirectories.contains(videoDirectoryName)
-            if currentYearDirectory.lastPathComponent == year {
-                if !placesAsVideo, !isInVideoDirectory {
-                    return nil
-                }
-                if placesAsVideo, isInVideoDirectory {
-                    return nil
-                }
+            if currentYearDirectory.lastPathComponent == year, placesAsVideo == isInVideoDirectory {
+                return nil
             }
             if placesAsVideo {
                 prependVideoDirectory = false
@@ -346,22 +408,7 @@ enum LocalMediaOrganizationPlanner {
         for component in preservedDirectories {
             destinationDirectory.appendPathComponent(component, isDirectory: true)
         }
-        let destination = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
-        guard destination.standardizedFileURL != fileURL.standardizedFileURL,
-              isWithinRoot(destination, rootDirectory: rootDirectory) else {
-            return nil
-        }
-
-        return LocalMediaOrganizationItem(
-            sourceURL: fileURL,
-            sourceRelativePath: relativePath,
-            destinationURL: destination,
-            destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
-            proposedDate: oldest.date,
-            proposedSource: oldest.source,
-            isVideo: isVideo,
-            destinationWasRenamed: false
-        )
+        return destinationDirectory
     }
 
     private static let livePhotoStillExtensions: Set<String> = ["heic", "heif", "jpg", "jpeg"]
@@ -464,8 +511,13 @@ enum LocalMediaOrganizationPlanner {
         return String(calendar.component(.year, from: date))
     }
 
+    /// Four ASCII digits forming a plausible photo year; `0815` or `9999` are ordinary folders.
     private static func isYearDirectory(_ name: String) -> Bool {
-        name.count == 4 && name.allSatisfy(\.isNumber)
+        guard name.count == 4, name.allSatisfy({ $0.isASCII && $0.isNumber }), let year = Int(name) else {
+            return false
+        }
+        let currentYear = Calendar(identifier: .gregorian).component(.year, from: Date())
+        return (1900...(currentYear + 1)).contains(year)
     }
 
     private static func nearestYearDirectory(startingAt directory: URL) -> URL? {

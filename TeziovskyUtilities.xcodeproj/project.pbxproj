@@ -32,6 +32,7 @@
 		7ECD01CA2B604C1290A9B7DA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E58F090FFBE4CD68111AA5E /* SettingsView.swift */; };
 		542E4F26150440039DF5BC94 /* ToolPathField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9134CC30104548ACAA7C92B2 /* ToolPathField.swift */; };
 		A1F2B3C4D5E6478990112233 /* SafeFilename.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7488990112234 /* SafeFilename.swift */; };
+		A30000000000000000000001 /* LocalMediaTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* LocalMediaTree.swift */; };
 		045C8303A2124C4C98CDC620 /* ExifDateCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B53584FA83D24DE4A697F2C1 /* ExifDateCodec.swift */; };
 		C3D4E5F6A7B8499001122334 /* MediaSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9499001122335 /* MediaSummary.swift */; };
 		E5F6A7B8C9D0499001122336 /* ExportDirectoryAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1499001122337 /* ExportDirectoryAccess.swift */; };
@@ -109,6 +110,7 @@
 		0E58F090FFBE4CD68111AA5E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9134CC30104548ACAA7C92B2 /* ToolPathField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPathField.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7488990112234 /* SafeFilename.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeFilename.swift; sourceTree = "<group>"; };
+		B30000000000000000000001 /* LocalMediaTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaTree.swift; sourceTree = "<group>"; };
 		B53584FA83D24DE4A697F2C1 /* ExifDateCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExifDateCodec.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9499001122335 /* MediaSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaSummary.swift; sourceTree = "<group>"; };
 		F6A7B8C9D0E1499001122337 /* ExportDirectoryAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportDirectoryAccess.swift; sourceTree = "<group>"; };
@@ -240,6 +242,7 @@
 				990011223344556677889900 /* FileDatePreservation.swift */,
 				BBCCDDEEFF00112233445566 /* SleepAssertion.swift */,
 				B2C3D4E5F6A7488990112234 /* SafeFilename.swift */,
+				B30000000000000000000001 /* LocalMediaTree.swift */,
 				B53584FA83D24DE4A697F2C1 /* ExifDateCodec.swift */,
 				D4E5F6A7B8C9499001122335 /* MediaSummary.swift */,
 				F6A7B8C9D0E1499001122337 /* ExportDirectoryAccess.swift */,
@@ -397,6 +400,7 @@
 				7ECD01CA2B604C1290A9B7DA /* SettingsView.swift in Sources */,
 				542E4F26150440039DF5BC94 /* ToolPathField.swift in Sources */,
 				A1F2B3C4D5E6478990112233 /* SafeFilename.swift in Sources */,
+				A30000000000000000000001 /* LocalMediaTree.swift in Sources */,
 				045C8303A2124C4C98CDC620 /* ExifDateCodec.swift in Sources */,
 				C3D4E5F6A7B8499001122334 /* MediaSummary.swift in Sources */,
 				E5F6A7B8C9D0499001122336 /* ExportDirectoryAccess.swift in Sources */,

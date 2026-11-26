@@ -63,4 +63,46 @@ final class LocalMediaTreeTests: XCTestCase {
         XCTAssertFalse(service.isExcluded(path: paths[1], in: .organization))
         XCTAssertFalse(service.isExcluded(path: paths[2], in: .organization))
     }
+
+    func testDuplicatePathsAreListedOnce() {
+        let rows = LocalMediaTree.rows(paths: ["d/a.jpg", "d/a.jpg"], collapsed: [])
+        XCTAssertEqual(rows.map(\.id), ["d:d", "f:d/a.jpg"])
+        guard case let .folder(_, _, files) = rows[0].kind else { return XCTFail("folder") }
+        XCTAssertEqual(files, ["d/a.jpg"])
+    }
+
+    func testSiblingOrderIsStableForEqualNames() {
+        let first = LocalMediaTree.rows(paths: ["Foo/1.jpg", "foo/2.jpg"], collapsed: []).map(\.id)
+        let second = LocalMediaTree.rows(paths: ["foo/2.jpg", "Foo/1.jpg"], collapsed: []).map(\.id)
+        XCTAssertEqual(first.filter { $0.hasPrefix("d:") }, second.filter { $0.hasPrefix("d:") })
+    }
+
+    func testFilesKeepInputOrder() {
+        let rows = LocalMediaTree.rows(paths: ["b.jpg", "a.jpg"], collapsed: [])
+        XCTAssertEqual(rows.map(\.kind), [.file(index: 0), .file(index: 1)])
+    }
+
+    func testCollapsingMergedHeaderUsesDeepestPath() {
+        let rows = LocalMediaTree.rows(paths: paths, collapsed: ["Imprezy/Festiwale/Audioriver/2023"])
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertFalse(rows.contains { $0.id == "f:" + paths[0] })
+    }
+
+    func testFolderWithFilesAndOneSubfolderDoesNotMerge() {
+        let rows = LocalMediaTree.rows(paths: ["A/x.jpg", "A/B/y.jpg"], collapsed: [])
+        guard case let .folder(_, title, _) = rows[0].kind else { return XCTFail("folder") }
+        XCTAssertEqual(title, "A")
+        XCTAssertEqual(rows.map(\.depth), [0, 1, 2, 1])
+    }
+
+    func testFolderAndSimilarlyNamedFileStaySeparate() {
+        let rows = LocalMediaTree.rows(paths: ["a/x.jpg", "a.jpg"], collapsed: [])
+        XCTAssertEqual(rows.map(\.id), ["d:a", "f:a/x.jpg", "f:a.jpg"])
+    }
+
+    func testBulkSetterGivesSomeSelection() {
+        let service = LocalPhotosService()
+        service.setExcluded(true, paths: ["a", "b"], in: .repair)
+        XCTAssertEqual(service.selection(of: ["a", "b", "c"], in: .repair), .some)
+    }
 }

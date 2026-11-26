@@ -44,7 +44,13 @@ enum LocalMediaTree {
         init(name: String) { self.name = name }
 
         var sortedFolders: [Node] {
-            folders.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            folders.values.sorted {
+                switch $0.name.localizedStandardCompare($1.name) {
+                case .orderedAscending: return true
+                case .orderedDescending: return false
+                case .orderedSame: return $0.name < $1.name
+                }
+            }
         }
 
         var allFileIndexes: [Int] {
@@ -54,7 +60,9 @@ enum LocalMediaTree {
 
     static func rows(paths: [String], collapsed: Set<String>) -> [LocalMediaTreeRow] {
         let root = Node(name: "")
+        var seen = Set<String>()
         for (index, path) in paths.enumerated() {
+            guard seen.insert(path).inserted else { continue }
             let parts = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
             guard !parts.isEmpty else { continue }
             var node = root

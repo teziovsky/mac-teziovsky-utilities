@@ -995,6 +995,7 @@ extension LocalPhotosService {
         } else {
             set.subtract(paths)
         }
+        guard set != (excludedPaths[step] ?? []) else { return }
         excludedPaths[step] = set
     }
 

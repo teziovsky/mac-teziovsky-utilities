@@ -421,7 +421,6 @@ enum LocalMediaListFilter {
 }
 
 @MainActor
-// swiftlint:disable:next type_body_length
 final class LocalPhotosService: ObservableObject {
     @Published private(set) var directory: URL?
     @Published private(set) var conversionItems: [LocalMediaConversionItem] = []
@@ -457,18 +456,6 @@ final class LocalPhotosService: ObservableObject {
     /// Files the user unticked, per step, keyed by relative path so the choice survives the
     /// automatic rescan after converting or organizing.
     @Published private(set) var excludedPaths: [LocalMediaStep: Set<String>] = [:]
-
-    func setExcluded(_ excluded: Bool, path: String, in step: LocalMediaStep) {
-        if excluded {
-            excludedPaths[step, default: []].insert(path)
-        } else {
-            excludedPaths[step]?.remove(path)
-        }
-    }
-
-    func isExcluded(path: String, in step: LocalMediaStep) -> Bool {
-        excludedPaths[step]?.contains(path) ?? false
-    }
 
     var includedConversionItems: [LocalMediaConversionItem] {
         conversionItems.filter { !isExcluded(path: $0.sourceRelativePath, in: .conversion) }
@@ -988,6 +975,37 @@ enum FileDateRepairExecutor {
             modified: modified,
             to: fileURL
         )
+    }
+}
+
+extension LocalPhotosService {
+    func setExcluded(_ excluded: Bool, path: String, in step: LocalMediaStep) {
+        if excluded {
+            excludedPaths[step, default: []].insert(path)
+        } else {
+            excludedPaths[step]?.remove(path)
+        }
+    }
+
+    /// Bulk form for a folder row; publishes a single change however many paths there are.
+    func setExcluded(_ excluded: Bool, paths: [String], in step: LocalMediaStep) {
+        var set = excludedPaths[step] ?? []
+        if excluded {
+            set.formUnion(paths)
+        } else {
+            set.subtract(paths)
+        }
+        excludedPaths[step] = set
+    }
+
+    func isExcluded(path: String, in step: LocalMediaStep) -> Bool {
+        excludedPaths[step]?.contains(path) ?? false
+    }
+
+    func selection(of paths: [String], in step: LocalMediaStep) -> LocalMediaFolderSelection {
+        let excluded = paths.filter { isExcluded(path: $0, in: step) }.count
+        if excluded == 0 { return .all }
+        return excluded == paths.count ? .none : .some
     }
 }
 

@@ -73,6 +73,9 @@ struct ExternalDriveMover: Sendable {
     static let defaultTrash: @Sendable (URL) throws -> Void = { url in
         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
+    static let defaultFlush: @Sendable ([URL], URL) throws -> Void = { files, destinationRoot in
+        try ExternalDriveMoverFileSystem.flush(files, destinationRoot: destinationRoot)
+    }
 
     private let copier: ExternalDriveCopying
     private let trash: @Sendable (URL) throws -> Void
@@ -82,8 +85,7 @@ struct ExternalDriveMover: Sendable {
 
     init(copier: ExternalDriveCopying = CopyfileCopier(),
          trash: @escaping @Sendable (URL) throws -> Void = defaultTrash,
-         flush: @escaping @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void =
-            ExternalDriveMoverFileSystem.flush,
+         flush: @escaping @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void = defaultFlush,
          log: @escaping @Sendable (String) -> Void = { _ in },
          renameStrategy: ExternalDriveRenameStrategy = .exclusiveRename) {
         self.copier = copier

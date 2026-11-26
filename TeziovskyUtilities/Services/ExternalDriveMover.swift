@@ -76,15 +76,19 @@ struct ExternalDriveMover: Sendable {
 
     private let copier: ExternalDriveCopying
     private let trash: @Sendable (URL) throws -> Void
+    private let flush: @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void
     private let log: @Sendable (String) -> Void
     private let renameStrategy: ExternalDriveRenameStrategy
 
     init(copier: ExternalDriveCopying = CopyfileCopier(),
          trash: @escaping @Sendable (URL) throws -> Void = defaultTrash,
+         flush: @escaping @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void =
+            ExternalDriveMoverFileSystem.flush,
          log: @escaping @Sendable (String) -> Void = { _ in },
          renameStrategy: ExternalDriveRenameStrategy = .exclusiveRename) {
         self.copier = copier
         self.trash = trash
+        self.flush = flush
         self.log = log
         self.renameStrategy = renameStrategy
     }
@@ -138,6 +142,12 @@ struct ExternalDriveMover: Sendable {
                 completed += Int64(member.fingerprint.size)
                 guard progress(completed) else { throw Stop(outcome: .cancelled) }
                 fixUpMetadata(of: member)
+            }
+            do {
+                try flush(members.map(\.destination), destinationRoot)
+            } catch {
+                throw Stop(outcome: .failed(
+                    "Couldn't flush the copy to \(destinationRoot.lastPathComponent): \(error.localizedDescription)"))
             }
             try verify(members, checkedFingerprints: checkedFingerprints, completedBytes: completed, progress: progress)
         } catch let stop as Stop {
@@ -339,9 +349,11 @@ struct ExternalDriveMover: Sendable {
             log("Rollback: couldn't remove the folder \(folder.path): errno \(errno)")
         }
     }
+}
 
-    // MARK: Already on the destination
+// MARK: - Already on the destination
 
+extension ExternalDriveMover {
     /// Trashes the originals of a unit whose files are already on the destination, but only when every
     /// destination file is identical to its original (and is a different file, not the original itself).
     /// A member whose original is already gone while its copy exists (a pair half-trashed by an earlier

@@ -113,6 +113,30 @@ enum ExternalDriveMoverFileSystem {
         return result == 0 ? nil : lastError()
     }
 
+    /// Pushes finished copies all the way to the drive before any original is trashed: each file and its
+    /// folder get `F_FULLFSYNC` (plain `fsync` where unsupported), then the whole volume is synced, because
+    /// exFAT keeps xattrs in separate `._` AppleDouble files.
+    static func flush(_ files: [URL], destinationRoot: URL) throws {
+        var folders: [URL] = []
+        for file in files {
+            try fullSync(file, flags: O_RDONLY | O_NOFOLLOW)
+            let folder = file.deletingLastPathComponent()
+            if !folders.contains(folder) { folders.append(folder) }
+        }
+        for folder in folders { try fullSync(folder, flags: O_RDONLY | O_DIRECTORY) }
+        let result = sync_volume_np(destinationRoot.path, SYNC_VOLUME_FULLSYNC | SYNC_VOLUME_WAIT)
+        if result != 0 { throw POSIXError(POSIXErrorCode(rawValue: result > 0 ? result : errno) ?? .EIO) }
+    }
+
+    private static func fullSync(_ url: URL, flags: Int32) throws {
+        let descriptor = open(url.path, flags)
+        guard descriptor >= 0 else { throw lastError() }
+        defer { close(descriptor) }
+        if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+        guard errno == ENOTSUP || errno == EOPNOTSUPP else { throw lastError() }
+        if fsync(descriptor) != 0 { throw lastError() }
+    }
+
     static func isSameFile(_ lhs: URL, _ rhs: URL) throws -> Bool {
         var left = stat()
         var right = stat()

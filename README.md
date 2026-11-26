@@ -44,7 +44,9 @@ Start it from the home screen (it never runs on its own). Choose the two folders
 
 **Originals already on the drive.** *Trash Originals Already on <drive>…* is offered only for files whose copy on the drive is identical (same size, dates, flags, extended attributes and content); it asks first.
 
-**While it runs.** Progress and an ETA are shown, Cancel stops right away; the file in flight is rolled back and files already moved stay moved, and the Mac is kept awake. If the drive is disconnected the run stops. At the end you get one notification and a summary; **Show Log** reveals the log of every file in Finder.
+**While it runs.** Progress and an ETA are shown, Cancel stops right away; the file in flight is rolled back and files already moved stay moved, and the Mac is kept awake. If the drive is disconnected, or another drive is mounted in its place, the run stops. Eject the drive in Finder before unplugging it. At the end you get one notification and a summary; **Show Log** reveals the log of every file in Finder.
+
+**After a crash or force quit.** A unit cut off mid-copy can leave a leftover on the drive while its original stays in the source folder: a hidden `.<name>.partial` file, a 0-byte file with the final name, or a copy that was never verified. A `.partial` is replaced by the next move of that file. A leftover under the final name shows as *Already on <drive>*, and *Trash Originals Already on <drive>…* reports it as a different file instead of trashing the original. To clean up, delete the leftover on the drive (⇧⌘. shows hidden files in Finder), then press Check Again (⌘R).
 
 ### Organize Drone Footage
 
@@ -66,7 +68,7 @@ Every workflow uses the same shortcuts, all listed in the menu bar. When a short
 |----------|---------|----------------------|-----------------------|------------------------|------------------------|
 | ⇧⌘H | Go → Home | ✓ | ✓ (scan results are discarded) | ✓ | ✓ |
 | ⌘[ / Esc | Go → Back one level (Esc in a text field first leaves the field) | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | summary → review → home; never changes files | previous step; never changes files |
-| ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose the source folder for this session | choose a project folder |
+| ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | File → Choose Source Folder for This Session…: another source for this session only (the review's Choose Source Folder… saves it in Settings) | choose a project folder |
 | ⇧⌘R | File → Reveal in Finder | export folder | media folder | source folder | project folder |
 | ⌘R | View → Refresh | reload albums | rescan the folder | Check Again | re-check the current step |
 | ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | Choose Source Folder… (or Choose Drive Folder…) until both are set; Move N Files… (confirmed first) when files are ready; otherwise Check Again; Done on the summary | continue / run step (destructive steps confirmed first) |

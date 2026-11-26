@@ -316,6 +316,8 @@ final class ExternalDriveMoverTests: XCTestCase {
         guard case .verifiedButNotTrashed(let message) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertTrue(message.hasPrefix("Copied and verified, but the original couldn't be moved to the Trash: "),
                       message)
+        XCTAssertTrue(message.hasSuffix(". If the original is locked, unlock it in Finder (Get Info)."), message)
+        XCTAssertFalse(message.contains(".."), message)
         XCTAssertTrue(exists(source))
         XCTAssertEqual(try identical(before, dst.appendingPathComponent("a.jpg")), [])
         XCTAssertFalse(log.lines.isEmpty)

@@ -23,7 +23,8 @@ struct ExternalDriveMovingCard: View {
                     Spacer()
                     Button("Cancel") { service.cancel() }
                         .pillActionButton()
-                        .help("Stop after the current file; a file that isn't verified yet is left unchanged")
+                        .help("Stop now. The file being copied is rolled back and its original stays; "
+                            + "files already moved stay moved.")
                 }
 
                 VStack(alignment: .leading, spacing: 6) {

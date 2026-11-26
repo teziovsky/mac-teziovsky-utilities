@@ -355,8 +355,13 @@ struct ExternalDriveMover: Sendable {
             }
         }
         guard let failure else { return .moved }
-        return .verifiedButNotTrashed(
-            "Copied and verified, but the original couldn't be moved to the Trash: \(failure)")
+        return .verifiedButNotTrashed(Self.notTrashedMessage(failure))
+    }
+
+    static func notTrashedMessage(_ failure: String) -> String {
+        let reason = failure.hasSuffix(".") ? String(failure.dropLast()) : failure
+        return "Copied and verified, but the original couldn't be moved to the Trash: \(reason). "
+            + "If the original is locked, unlock it in Finder (Get Info)."
     }
 
     private func rollBack(_ created: Created) {

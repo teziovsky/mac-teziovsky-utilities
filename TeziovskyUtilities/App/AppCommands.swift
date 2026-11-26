@@ -337,7 +337,7 @@ extension AppState {
     var openFolderTitle: String {
         switch route {
         case .drone: return "Open Project Folder…"
-        case .externalDrive: return "Choose Source Folder…"
+        case .externalDrive: return "Choose Source Folder for This Session…"
         default: return "Open Media Folder…"
         }
     }

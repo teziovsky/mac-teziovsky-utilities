@@ -67,7 +67,7 @@ final class AppCommandDecisionTests: XCTestCase {
         XCTAssertEqual(state.decision(for: .openFolder), .perform)
         XCTAssertEqual(state.decision(for: .back), .perform)
         XCTAssertEqual(state.decision(for: .escape), .perform)
-        XCTAssertEqual(state.openFolderTitle, "Choose Source Folder…")
+        XCTAssertEqual(state.openFolderTitle, "Choose Source Folder for This Session…")
         XCTAssertEqual(state.refreshTitle, "Check Again")
     }
 

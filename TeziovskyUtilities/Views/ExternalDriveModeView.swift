@@ -140,7 +140,7 @@ private struct ExternalDriveReviewCard: View {
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
         } message: {
-            Text("Originals go to the Trash after each file is verified.")
+            Text(ExternalDriveText.moveConfirmationMessage(service.review, destinationName: name))
         }
         .confirmationDialog(
             "Move \(existingFileCount) originals to the Trash?",
@@ -325,7 +325,8 @@ private struct ExternalDriveReviewCard: View {
         let title = role == .source ? "Choose Source Folder…" : "Choose Drive Folder…"
         let button = Button(title) { appState.chooseExternalDriveFolder(role) }
             .pillActionButton(prominent: prominent)
-            .help(role == .source ? "Choose the folder to move from" : "Choose the folder on the drive")
+            .help((role == .source ? "Choose the folder to move from" : "Choose the folder on the drive")
+                + (prominent ? " (↩)" : ""))
         return Group {
             if prominent {
                 button.keyboardShortcut(.defaultAction)

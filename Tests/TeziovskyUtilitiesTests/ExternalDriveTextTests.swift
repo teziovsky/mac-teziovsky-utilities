@@ -27,6 +27,19 @@ final class ExternalDriveTextTests: XCTestCase {
                        "MEDIA wasn't reachable")
     }
 
+    func testMoveConfirmationShowsWhereTheFirstReadyFileGoes() {
+        let review = ExternalDriveReview(entries: [], readyUnits: [
+            ExternalDriveUnit(relativePaths: ["2024/IMG_0001.jpg", "2024/IMG_0001.MOV"], byteCount: 1),
+            ExternalDriveUnit(relativePaths: ["2024/IMG_0002.jpg"], byteCount: 1)
+        ], existingUnits: [])
+        XCTAssertEqual(
+            ExternalDriveText.moveConfirmationMessage(review, destinationName: "MEDIA"),
+            "Originals go to the Trash after each file is verified.\n2024/IMG_0001.jpg → MEDIA/2024/IMG_0001.jpg"
+        )
+        XCTAssertEqual(ExternalDriveText.moveConfirmationMessage(nil, destinationName: "MEDIA"),
+                       "Originals go to the Trash after each file is verified.")
+    }
+
     func testAttentionItemsListFailuresThenNotAttempted() {
         let summary = ExternalDriveRunSummary(
             kind: .move, totalUnits: 4, attemptedUnits: 2, succeededUnits: 1,

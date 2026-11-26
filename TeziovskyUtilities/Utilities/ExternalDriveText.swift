@@ -126,6 +126,14 @@ enum ExternalDriveText {
         return .confirm(fileCount: fileCount)
     }
 
+    /// The move confirmation's text, with one example of where a file lands, e.g.
+    /// "2024/IMG_0001.jpg → MEDIA/2024/IMG_0001.jpg".
+    static func moveConfirmationMessage(_ review: ExternalDriveReview?, destinationName: String) -> String {
+        let message = "Originals go to the Trash after each file is verified."
+        guard let path = review?.readyUnits.first?.relativePaths.first else { return message }
+        return "\(message)\n\(path) → \(destinationName)/\(path)"
+    }
+
     static func byteCount(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }

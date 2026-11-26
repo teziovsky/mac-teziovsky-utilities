@@ -46,7 +46,7 @@ Photos, Organize Local Media, Move to External Drive, Organize Drone Footage) be
   the left, secondary actions, then the prominent primary action on the right) → the
   long list or details. Never put step navigation below a list. Use the shared
   containers (`DroneStepContainer`, `DroneWorkflowStepContainer`) or the same order in
-  Local Photos cards.
+  Organize Local Media cards.
 - When the step changes, scroll back to the top (`ScrollViewReader`, an `.id` on the
   header, `onChange` of the step) so the new step's buttons are visible.
 - The primary button gets `.keyboardShortcut(.defaultAction)` and `.help("… (↩)")`;

@@ -190,7 +190,9 @@ final class LocalMediaOrganizationPlannerTests: XCTestCase {
             proposedDate: date(2024),
             proposedSource: .filesystemCreation,
             isVideo: false,
-            destinationWasRenamed: false
+            destinationWasRenamed: false,
+            rootDirectory: root,
+            groupsWithPhotos: false
         )
 
         do {

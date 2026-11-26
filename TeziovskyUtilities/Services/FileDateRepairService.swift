@@ -335,8 +335,20 @@ enum LocalMediaOrganizer {
             url: item.sourceURL,
             isVideo: item.isVideo
         )
-        guard let oldest = FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence),
-              abs(oldest.date.timeIntervalSince(item.proposedDate)) <=
+        // Re-plan on the fresh dates: the move still applies if it lands in the same folder for
+        // the same deciding date (an embedded date can decide, not only the oldest one).
+        let replanned = LocalMediaOrganizationPlanner.plan(
+            fileURL: item.sourceURL,
+            relativePath: item.sourceRelativePath,
+            rootDirectory: item.rootDirectory,
+            evidence: evidence,
+            isVideo: item.isVideo,
+            groupsWithPhotos: item.groupsWithPhotos
+        )
+        guard case .move(let fresh) = replanned,
+              fresh.destinationURL.deletingLastPathComponent().standardizedFileURL.path
+              == item.destinationURL.deletingLastPathComponent().standardizedFileURL.path,
+              abs(fresh.proposedDate.timeIntervalSince(item.proposedDate)) <=
               FileDateRepairPlanner.timestampTolerance else {
             throw CocoaError(
                 .fileReadUnknown,

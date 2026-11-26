@@ -11,7 +11,9 @@ extension LocalMediaOrganizationItem {
             proposedDate: proposedDate,
             proposedSource: proposedSource,
             isVideo: isVideo,
-            destinationWasRenamed: destination.lastPathComponent != destinationURL.lastPathComponent
+            destinationWasRenamed: destination.lastPathComponent != destinationURL.lastPathComponent,
+            rootDirectory: rootDirectory,
+            groupsWithPhotos: groupsWithPhotos
         )
     }
 }
@@ -20,8 +22,8 @@ enum LocalMediaOrganizationPlan: Sendable, Equatable {
     case move(LocalMediaOrganizationItem)
     /// Already in its computed destination, or no usable date.
     case unchanged
-    /// Stays in its year folder although its only usable date (a file-system date) points
-    /// to another year.
+    /// Stays in its year folder: it has no embedded date, and only file-system dates disagree
+    /// with the folder's year.
     case kept(LocalMediaKeptItem)
     /// Belongs in a sibling year folder outside the scanned folder.
     case outsideScannedFolder(year: String)
@@ -118,7 +120,9 @@ enum LocalMediaOrganizationPlanner {
             proposedDate: placement.evidence.date,
             proposedSource: placement.evidence.source,
             isVideo: isVideo,
-            destinationWasRenamed: false
+            destinationWasRenamed: false,
+            rootDirectory: rootDirectory,
+            groupsWithPhotos: groupsWithPhotos
         ))
     }
 

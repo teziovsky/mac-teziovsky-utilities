@@ -105,7 +105,9 @@ final class LivePhotoOrganizationTests: XCTestCase {
             proposedDate: date(2019, 7, 1),
             proposedSource: .exifOriginal,
             isVideo: isVideo,
-            destinationWasRenamed: false
+            destinationWasRenamed: false,
+            rootDirectory: root,
+            groupsWithPhotos: false
         )
     }
 

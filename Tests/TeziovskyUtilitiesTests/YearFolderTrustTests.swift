@@ -90,6 +90,23 @@ final class YearFolderTrustTests: XCTestCase {
         XCTAssertEqual(placementYear(utc(2023, 1, 1, 5, 0)), 2023, "06:00 in Warsaw starts the new year")
     }
 
+    func testNewYearWindowAndNightRuleBoundaries() {
+        let inWindow = {
+            LocalMediaOrganizationPlanner.isInNewYearWindow($0, nextToYearFolder: 2022, timeZone: self.warsaw)
+        }
+        let placementYear = { LocalMediaOrganizationPlanner.placementYear(for: $0, timeZone: self.warsaw) }
+        let opens = local(2022, 12, 31, 12)
+        let closes = local(2023, 1, 1, 12)
+        let morning = local(2023, 1, 1, 6)
+
+        XCTAssertFalse(inWindow(opens.addingTimeInterval(-1)), "31 Dec 11:59:59 is before the window")
+        XCTAssertTrue(inWindow(opens), "31 Dec 12:00:00 opens the window")
+        XCTAssertTrue(inWindow(closes.addingTimeInterval(-1)), "1 Jan 11:59:59 is still inside")
+        XCTAssertFalse(inWindow(closes), "1 Jan 12:00:00 closes the window")
+        XCTAssertEqual(placementYear(morning.addingTimeInterval(-1)), 2022, "1 Jan 05:59:59 is the night before")
+        XCTAssertEqual(placementYear(morning), 2023, "1 Jan 06:00:00 is the new year")
+    }
+
     func testGPSEpochIsIgnored() {
         let gpsEpoch = utc(1980, 1, 6, 10)
         XCTAssertTrue(FileDateRepairPlanner.isSentinel(gpsEpoch))

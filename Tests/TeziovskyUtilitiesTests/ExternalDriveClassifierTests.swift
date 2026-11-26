@@ -50,7 +50,7 @@ final class ExternalDriveClassifierTests: XCTestCase {
         LocalMediaOrganizationItem(
             sourceURL: url, sourceRelativePath: "a.mov", destinationURL: url,
             destinationRelativePath: destination, proposedDate: Date(), proposedSource: .exifOriginal,
-            isVideo: true, destinationWasRenamed: false
+            isVideo: true, destinationWasRenamed: false, rootDirectory: url, groupsWithPhotos: false
         )
     }
 

@@ -175,6 +175,9 @@ struct LocalMediaOrganizationItem: Identifiable, Sendable, Equatable {
     let proposedSource: FileDateSource
     let isVideo: Bool
     let destinationWasRenamed: Bool
+    /// What the plan was made against, so applying it can re-plan on fresh dates.
+    let rootDirectory: URL
+    let groupsWithPhotos: Bool
 }
 
 struct LocalMediaOrganizationSummary: Sendable, Equatable {

@@ -600,7 +600,63 @@ final class FileDateRepairScannerTests: XCTestCase {
         }
     }
 
-    private func makeRepairCandidate(_ relativePath: String) throws {
+    func testScanOutputsReportsUndatedFileAsHavingNoUsableDate() async throws {
+        try makeRepairCandidate("undated.jpg", exifDate: nil)
+        let sentinel = Date(timeIntervalSince1970: 0)
+        try FileManager.default.setAttributes(
+            [.creationDate: sentinel, .modificationDate: sentinel],
+            ofItemAtPath: root.appendingPathComponent("undated.jpg").path
+        )
+
+        let result = try await FileDateRepairScanner.scanOutputs(
+            directory: root,
+            supportedExtensions: ["jpg"],
+            progress: { _ in }
+        )
+
+        let output = try XCTUnwrap(result.outputs.first)
+        XCTAssertEqual(result.outputs.count, 1)
+        XCTAssertFalse(output.hasUsableDate)
+        XCTAssertTrue(output.isAlreadyOrganized)
+    }
+
+    func testScanOutputsReportsOutsideYear() async throws {
+        let yearFolder = root.appendingPathComponent("2025", isDirectory: true)
+        try makeRepairCandidate("2025/old.jpg", exifDate: "2024:06:01 12:00:00")
+        let taken = Date(timeIntervalSince1970: 1_717_243_200)
+        try FileManager.default.setAttributes(
+            [.creationDate: taken, .modificationDate: taken],
+            ofItemAtPath: yearFolder.appendingPathComponent("old.jpg").path
+        )
+
+        let result = try await FileDateRepairScanner.scanOutputs(
+            directory: yearFolder,
+            supportedExtensions: ["jpg"],
+            progress: { _ in }
+        )
+
+        let output = try XCTUnwrap(result.outputs.first)
+        XCTAssertTrue(output.hasUsableDate)
+        XCTAssertEqual(output.outsideScannedFolderYear, "2024")
+        XCTAssertFalse(output.notices.isEmpty)
+    }
+
+    func testScanAggregatesTheSameAsBefore() async throws {
+        try makeRepairCandidate("2005/2005 Trip/organized.jpg")
+        try makeRepairCandidate("loose.jpg")
+
+        let result = try await FileDateRepairScanner.scan(
+            directory: root,
+            supportedExtensions: ["jpg"],
+            progress: { _ in }
+        )
+
+        XCTAssertEqual(result.scannedFileCount, 2)
+        XCTAssertEqual(result.organizationItems.count, 1)
+        XCTAssertEqual(result.organizationSkippedCount, 1)
+    }
+
+    private func makeRepairCandidate(_ relativePath: String, exifDate: String? = "2005:01:01 00:00:00") throws {
         let url = root.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
@@ -619,11 +675,10 @@ final class FileDateRepairScannerTests: XCTestCase {
         let destination = try XCTUnwrap(
             CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
         )
-        let properties: [CFString: Any] = [
-            kCGImagePropertyExifDictionary: [
-                kCGImagePropertyExifDateTimeOriginal: "2005:01:01 00:00:00"
-            ]
-        ]
+        var properties: [CFString: Any] = [:]
+        if let exifDate {
+            properties[kCGImagePropertyExifDictionary] = [kCGImagePropertyExifDateTimeOriginal: exifDate]
+        }
         CGImageDestinationAddImage(destination, image, properties as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
     }

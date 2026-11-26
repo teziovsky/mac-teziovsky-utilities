@@ -7,9 +7,19 @@ struct FileDateScanOutput: Sendable {
     let organizationCandidate: LocalMediaOrganizationItem?
     /// True when the file is already where organizing would put it.
     let isAlreadyOrganized: Bool
+    /// False when no plausible date evidence exists (or the file could not be read).
+    let hasUsableDate: Bool
+    /// The year the file belongs to when that year folder is outside the scanned folder.
+    let outsideScannedFolderYear: String?
     /// Non-fatal problems worth showing (unsupported conversion, unreachable year folder).
     let notices: [FileDateRepairFailure]
     let failure: FileDateRepairFailure?
+}
+
+struct FileDateScanOutputs: Sendable {
+    let outputs: [FileDateScanOutput]
+    let enumerationFailures: [FileDateRepairFailure]
+    let livePhotoCompanions: [String: String]
 }
 
 struct FileDateScanResult: Sendable {
@@ -30,15 +40,56 @@ enum FileDateRepairScanner {
         conversionConfig: LocalMediaConversionConfig = .default,
         progress: @escaping @Sendable (FileDateRepairProgress) async -> Void
     ) async throws -> FileDateScanResult {
-        let enumeration = try enumerateFiles(in: directory, supportedExtensions: supportedExtensions)
-        let livePhotoCompanions = LocalMediaOrganizationPlanner.livePhotoCompanions(
-            in: enumeration.files.map(\.relativePath)
+        let scanned = try await scanOutputs(
+            directory: directory,
+            supportedExtensions: supportedExtensions,
+            conversionConfig: conversionConfig,
+            progress: progress
         )
-        var failures = enumeration.failures
+        var failures = scanned.enumerationFailures
         var conversionCandidates: [LocalMediaConversionItem] = []
         var items: [FileDateRepairItem] = []
         var organizationCandidates: [LocalMediaOrganizationItem] = []
         var organizationSkippedCount = 0
+
+        for output in scanned.outputs {
+            if let item = output.conversionCandidate { conversionCandidates.append(item) }
+            if let item = output.repairItem { items.append(item) }
+            if let item = output.organizationCandidate { organizationCandidates.append(item) }
+            if output.isAlreadyOrganized { organizationSkippedCount += 1 }
+            failures.append(contentsOf: output.notices)
+            if let failure = output.failure { failures.append(failure) }
+        }
+
+        return FileDateScanResult(
+            conversionItems: LocalMediaConversionPlanner.resolveCollisions(
+                conversionCandidates,
+                rootDirectory: directory
+            ),
+            items: items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending },
+            organizationItems: LocalMediaOrganizationPlanner.resolveCollisions(
+                organizationCandidates,
+                rootDirectory: directory,
+                livePhotoCompanions: scanned.livePhotoCompanions
+            ),
+            organizationSkippedCount: organizationSkippedCount,
+            failures: failures,
+            scannedFileCount: scanned.outputs.count
+        )
+    }
+
+    /// Reads every supported file once and returns the per-file outputs, in completion order.
+    static func scanOutputs(
+        directory: URL,
+        supportedExtensions: Set<String>,
+        conversionConfig: LocalMediaConversionConfig = .default,
+        progress: @escaping @Sendable (FileDateRepairProgress) async -> Void
+    ) async throws -> FileDateScanOutputs {
+        let enumeration = try enumerateFiles(in: directory, supportedExtensions: supportedExtensions)
+        let livePhotoCompanions = LocalMediaOrganizationPlanner.livePhotoCompanions(
+            in: enumeration.files.map(\.relativePath)
+        )
+        var outputs: [FileDateScanOutput] = []
         var nextIndex = 0
         var processed = 0
 
@@ -64,12 +115,7 @@ enum FileDateRepairScanner {
             while let output = try await group.next() {
                 try Task.checkCancellation()
                 processed += 1
-                if let item = output.conversionCandidate { conversionCandidates.append(item) }
-                if let item = output.repairItem { items.append(item) }
-                if let item = output.organizationCandidate { organizationCandidates.append(item) }
-                if output.isAlreadyOrganized { organizationSkippedCount += 1 }
-                failures.append(contentsOf: output.notices)
-                if let failure = output.failure { failures.append(failure) }
+                outputs.append(output)
                 if processed == enumeration.files.count || processed.isMultiple(of: 20) {
                     await progress(
                         FileDateRepairProgress(
@@ -83,20 +129,10 @@ enum FileDateRepairScanner {
             }
         }
 
-        return FileDateScanResult(
-            conversionItems: LocalMediaConversionPlanner.resolveCollisions(
-                conversionCandidates,
-                rootDirectory: directory
-            ),
-            items: items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending },
-            organizationItems: LocalMediaOrganizationPlanner.resolveCollisions(
-                organizationCandidates,
-                rootDirectory: directory,
-                livePhotoCompanions: livePhotoCompanions
-            ),
-            organizationSkippedCount: organizationSkippedCount,
-            failures: failures,
-            scannedFileCount: enumeration.files.count
+        return FileDateScanOutputs(
+            outputs: outputs,
+            enumerationFailures: enumeration.failures,
+            livePhotoCompanions: livePhotoCompanions
         )
     }
 
@@ -133,6 +169,7 @@ enum FileDateRepairScanner {
             )
             var organizationCandidate: LocalMediaOrganizationItem?
             var isAlreadyOrganized = false
+            var outsideYear: String?
             switch LocalMediaOrganizationPlanner.plan(
                 fileURL: file.url,
                 relativePath: file.relativePath,
@@ -146,6 +183,7 @@ enum FileDateRepairScanner {
             case .unchanged:
                 isAlreadyOrganized = true
             case .outsideScannedFolder(let year):
+                outsideYear = year
                 notices.append(FileDateRepairFailure(
                     relativePath: file.relativePath,
                     message: "Belongs in a “\(year)” folder next to the year folder above the scanned folder. "
@@ -158,6 +196,8 @@ enum FileDateRepairScanner {
                 repairItem: repairItem,
                 organizationCandidate: organizationCandidate,
                 isAlreadyOrganized: isAlreadyOrganized,
+                hasUsableDate: FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence) != nil,
+                outsideScannedFolderYear: outsideYear,
                 notices: notices,
                 failure: nil
             )
@@ -170,6 +210,8 @@ enum FileDateRepairScanner {
                 repairItem: nil,
                 organizationCandidate: nil,
                 isAlreadyOrganized: false,
+                hasUsableDate: false,
+                outsideScannedFolderYear: nil,
                 notices: notices,
                 failure: FileDateRepairFailure(relativePath: file.relativePath, message: error.localizedDescription)
             )

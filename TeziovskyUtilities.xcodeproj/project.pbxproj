@@ -42,6 +42,7 @@
 		A00100000000000000000005 /* DroneFinalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* DroneFinalizer.swift */; };
 		5FF281A0E07F4B9787B9D5E4 /* CompressedVideoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4127A89C8B1049F3B2AF37B6 /* CompressedVideoVerifier.swift */; };
 		A00100000000000000000006 /* VideoMetadataTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000006 /* VideoMetadataTransfer.swift */; };
+		A0010000000000000000F002 /* FileMetadataFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F002 /* FileMetadataFingerprint.swift */; };
 		A00100000000000000000011 /* MediaMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000011 /* MediaMetadataReader.swift */; };
 		A00100000000000000000007 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000007 /* RootView.swift */; };
 		A00100000000000000000008 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* HomeView.swift */; };
@@ -102,6 +103,7 @@
 		B00100000000000000000005 /* DroneFinalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFinalizer.swift; sourceTree = "<group>"; };
 		4127A89C8B1049F3B2AF37B6 /* CompressedVideoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressedVideoVerifier.swift; sourceTree = "<group>"; };
 		B00100000000000000000006 /* VideoMetadataTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMetadataTransfer.swift; sourceTree = "<group>"; };
+		B0010000000000000000F002 /* FileMetadataFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMetadataFingerprint.swift; sourceTree = "<group>"; };
 		B00100000000000000000011 /* MediaMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaMetadataReader.swift; sourceTree = "<group>"; };
 		B00100000000000000000007 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B00100000000000000000008 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -179,6 +181,7 @@
 				B00100000000000000000013 /* DroneExportScanner.swift */,
 				B00100000000000000000014 /* HandBrakeCompressor.swift */,
 				B00100000000000000000006 /* VideoMetadataTransfer.swift */,
+				B0010000000000000000F002 /* FileMetadataFingerprint.swift */,
 				B00100000000000000000011 /* MediaMetadataReader.swift */,
 				B00200000000000000000002 /* FileDateRepairService.swift */,
 				B00300000000000000000001 /* LocalMediaConversion.swift */,
@@ -361,6 +364,7 @@
 				A00100000000000000000015 /* DroneMediaPaths.swift in Sources */,
 				A00100000000000000000016 /* DroneProjectValidator.swift in Sources */,
 				A00100000000000000000006 /* VideoMetadataTransfer.swift in Sources */,
+				A0010000000000000000F002 /* FileMetadataFingerprint.swift in Sources */,
 				A00100000000000000000011 /* MediaMetadataReader.swift in Sources */,
 				A00100000000000000000007 /* RootView.swift in Sources */,
 				A00100000000000000000008 /* HomeView.swift in Sources */,

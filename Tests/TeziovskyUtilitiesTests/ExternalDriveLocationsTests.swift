@@ -79,6 +79,27 @@ final class ExternalDriveLocationsTests: XCTestCase {
         XCTAssertEqual(AppSettings.resolveExternalDriveFolder(.destination), .unavailable(path: "/Volumes/MEDIA"))
     }
 
+    func testFailedBookmarkNeverResolvesToPreviousFolder() throws {
+        let old = root.appendingPathComponent("Old", isDirectory: true)
+        try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+        AppSettings.storeExternalDriveFolder(old, role: .destination)
+        let missing = root.appendingPathComponent("New", isDirectory: true)
+        AppSettings.storeExternalDriveFolder(missing, role: .destination)
+        XCTAssertEqual(AppSettings.resolveExternalDriveFolder(.destination), .unavailable(path: missing.path))
+    }
+
+    func testBookmarkWithoutStoredPathIsNotChosen() {
+        AppSettings.externalDriveDefaults.set(Data([1, 2, 3]), forKey: "externalDriveSourceBookmark")
+        XCTAssertEqual(AppSettings.resolveExternalDriveFolder(.source), .notChosen)
+    }
+
+    func testPreflightDefaultBootVolumeTreatsFolderOnBootDiskAsNotConnected() throws {
+        let destination = root.appendingPathComponent("MEDIA", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let result = ExternalDriveLocations.preflight(destination: .resolved(destination))
+        XCTAssertEqual(result, .notConnected("MEDIA isn't connected. Connect the drive and press Check Again (⌘R)."))
+    }
+
     func testSuggestedPaths() {
         XCTAssertEqual(ExternalDriveFolderRole.destination.suggestedPath, "/Volumes/MEDIA")
         XCTAssertTrue(ExternalDriveFolderRole.source.suggestedPath.hasSuffix("/Pictures/_To_Homelab_Media"))

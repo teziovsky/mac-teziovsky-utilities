@@ -57,6 +57,9 @@ extension AppSettings {
             relativeTo: nil
         ) {
             externalDriveDefaults.set(bookmark, forKey: role.bookmarkKey)
+        } else {
+            // Never leave the previous folder's bookmark behind: it would win over the new path.
+            externalDriveDefaults.removeObject(forKey: role.bookmarkKey)
         }
     }
 
@@ -75,7 +78,8 @@ extension AppSettings {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
-            return .unavailable(path: storedPath ?? "")
+            guard let storedPath else { return .notChosen }
+            return .unavailable(path: storedPath)
         }
         if isStale || url.path != storedPath {
             let didAccess = url.startAccessingSecurityScopedResource()
@@ -104,6 +108,8 @@ enum ExternalDriveLocations {
             return .notConnected(notConnectedMessage(name: URL(fileURLWithPath: path).lastPathComponent))
         case let .resolved(url):
             let message = ExternalDrivePreflight.notConnected(notConnectedMessage(name: url.lastPathComponent))
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
             guard FileManager.default.fileExists(atPath: url.path),
                   let values = try? url.resourceValues(forKeys: [
                       .volumeIdentifierKey,

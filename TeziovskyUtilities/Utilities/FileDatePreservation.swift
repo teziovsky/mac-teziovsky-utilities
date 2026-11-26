@@ -96,180 +96,116 @@ enum FileDatePreservation {
         try applyFileDates(to: url, created: created, modified: modified)
     }
 
-    /// Rewrites every existing EXIF/TIFF creation field without adding fields the file
-    /// did not already contain. All image frames are copied to the replacement file.
+    /// Rewrites every existing EXIF/TIFF creation field to `date` **without re-encoding the
+    /// image data**: the container is copied with `CGImageDestinationCopyImageSource`, so pixels,
+    /// auxiliary images (depth, gain maps) and other metadata stay byte-for-byte intact.
+    ///
+    /// Each field is written as local time in its own EXIF offset when one exists; offset
+    /// fields are never added or changed. Fields the format refuses to update are removed so
+    /// no stale creation date survives.
     static func synchronizeImageCreationDates(in url: URL, to date: Date) throws {
-        let formattedDate = formatExifDate(date)
-        let offset = formatExifOffset(for: date)
-        try rewriteImageDateOverrides(at: url, formattedDate: formattedDate, offset: offset, removeStale: false)
+        try rewriteImageMetadata(at: url) { metadata, properties in
+            let fields = ExifDateCodec.Field.all.filter { hasValue(for: $0, in: properties) }
+            for field in fields {
+                let offset = ExifDateCodec.offset(for: field, in: properties)
+                let value = ExifDateCodec.xmpString(from: date, offset: offset)
+                guard CGImageMetadataSetValueMatchingImageProperty(
+                    metadata,
+                    field.dictionary,
+                    field.dateKey,
+                    value as CFString
+                ) else {
+                    throw metadataWriteError
+                }
+            }
+            return !fields.isEmpty
+        }
 
-        // ImageIO frequently updates DateTimeOriginal but leaves DateTimeDigitized unchanged.
-        // A second pass removes any creation field that still disagrees with the target.
-        if hasStaleEmbeddedCreationDates(at: url, target: date) {
-            try rewriteImageDateOverrides(at: url, formattedDate: formattedDate, offset: offset, removeStale: true)
+        let staleFields = embeddedFields(at: url)
+            .filter { abs($0.value.timeIntervalSince(date)) > FileDateRepairPlanner.timestampTolerance }
+            .map(\.field)
+        guard !staleFields.isEmpty else { return }
+
+        try rewriteImageMetadata(at: url) { metadata, _ in
+            for field in staleFields {
+                guard let tag = CGImageMetadataCopyTagMatchingImageProperty(
+                    metadata,
+                    field.dictionary,
+                    field.dateKey
+                ), let prefix = CGImageMetadataTagCopyPrefix(tag),
+                      let name = CGImageMetadataTagCopyName(tag) else {
+                    continue
+                }
+                CGImageMetadataRemoveTagWithPath(metadata, nil, "\(prefix):\(name)" as CFString)
+            }
+            return true
         }
     }
 
-    private static func rewriteImageDateOverrides(
+    /// Copies the image container to a temporary sibling with edited metadata, then atomically
+    /// replaces the original. `edit` returns false when nothing needs to change.
+    static func rewriteImageMetadata(
         at url: URL,
-        formattedDate: String,
-        offset: String,
-        removeStale: Bool
+        edit: (CGMutableImageMetadata, [CFString: Any]) throws -> Bool
     ) throws {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let destinationType = CGImageSourceGetType(source) else {
+              let type = CGImageSourceGetType(source),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             throw CocoaError(
                 .fileReadCorruptFile,
                 userInfo: [NSLocalizedDescriptionKey: "The image metadata could not be read."]
             )
         }
-
-        let target = parseExifDate(formattedDate)
-        let imageCount = CGImageSourceGetCount(source)
-        var overridesByIndex: [[CFString: Any]] = []
-        var didFindCreationDate = false
-        for index in 0..<imageCount {
-            guard let sourceProperties = CGImageSourceCopyPropertiesAtIndex(
-                source,
-                index,
-                nil
-            ) as? [CFString: Any] else {
-                throw CocoaError(
-                    .fileReadCorruptFile,
-                    userInfo: [NSLocalizedDescriptionKey: "The image metadata could not be read."]
-                )
-            }
-            let result = dateOverrideProperties(
-                from: sourceProperties,
-                formattedDate: formattedDate,
-                offset: offset,
-                target: target,
-                removeStale: removeStale
-            )
-            didFindCreationDate = result.didUpdate || didFindCreationDate
-            overridesByIndex.append(result.overrides)
-        }
-        guard didFindCreationDate else { return }
+        let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
+            .flatMap { CGImageMetadataCreateMutableCopy($0) } ?? CGImageMetadataCreateMutable()
+        guard try edit(metadata, properties) else { return }
 
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".image-metadata-\(UUID().uuidString)")
             .appendingPathExtension(url.pathExtension)
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        guard let destination = CGImageDestinationCreateWithURL(
-            tempURL as CFURL,
-            destinationType,
-            imageCount,
-            nil
-        ) else {
+        guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, type, 1, nil) else {
+            throw metadataWriteError
+        }
+        let options: [CFString: Any] = [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: false
+        ]
+        var error: Unmanaged<CFError>?
+        guard CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, &error) else {
+            let reason = error?.takeRetainedValue().localizedDescription ?? "unsupported format"
             throw CocoaError(
                 .fileWriteUnknown,
-                userInfo: [NSLocalizedDescriptionKey: "A replacement image could not be created."]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The image metadata could not be updated without re-encoding (\(reason))."
+                ]
             )
         }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+    }
 
-        CGImageDestinationSetProperties(
-            destination,
-            [kCGImageDestinationDateTime: formattedDate] as CFDictionary
+    private static var metadataWriteError: CocoaError {
+        CocoaError(
+            .fileWriteUnknown,
+            userInfo: [NSLocalizedDescriptionKey: "The synchronized image metadata could not be saved."]
         )
-
-        for (index, overrides) in overridesByIndex.enumerated() {
-            CGImageDestinationAddImageFromSource(
-                destination,
-                source,
-                index,
-                overrides.isEmpty ? nil : overrides as CFDictionary
-            )
-        }
-        guard CGImageDestinationFinalize(destination) else {
-            throw CocoaError(
-                .fileWriteUnknown,
-                userInfo: [NSLocalizedDescriptionKey: "The synchronized image metadata could not be saved."]
-            )
-        }
-
-        try FileManager.default.removeItem(at: url)
-        try FileManager.default.moveItem(at: tempURL, to: url)
     }
 
-    private static func dateOverrideProperties(
-        from sourceProperties: [CFString: Any],
-        formattedDate: String,
-        offset: String,
-        target: Date?,
-        removeStale: Bool
-    ) -> (overrides: [CFString: Any], didUpdate: Bool) {
-        var overrides: [CFString: Any] = [:]
-        var didUpdate = false
-        let tolerance = FileDateRepairPlanner.timestampTolerance
-
-        if let exif = sourceProperties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            var exifOverrides: [CFString: Any] = [:]
-            for (key, offsetKey) in [
-                (kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifOffsetTimeOriginal),
-                (kCGImagePropertyExifDateTimeDigitized, kCGImagePropertyExifOffsetTimeDigitized)
-            ] {
-                guard exif[key] != nil else { continue }
-                didUpdate = true
-                if removeStale,
-                   let target,
-                   let current = exif[key] as? String,
-                   let currentDate = parseExifDate(current),
-                   abs(currentDate.timeIntervalSince(target)) > tolerance {
-                    exifOverrides[key] = kCFNull
-                    exifOverrides[offsetKey] = kCFNull
-                } else {
-                    exifOverrides[key] = formattedDate
-                    exifOverrides[offsetKey] = offset
-                }
-            }
-            if exif[kCGImagePropertyExifOffsetTime] != nil {
-                exifOverrides[kCGImagePropertyExifOffsetTime] = offset
-            }
-            if !exifOverrides.isEmpty {
-                overrides[kCGImagePropertyExifDictionary] = exifOverrides
-            }
-        }
-
-        if let tiff = sourceProperties[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
-           tiff[kCGImagePropertyTIFFDateTime] != nil {
-            didUpdate = true
-            if removeStale,
-               let target,
-               let current = tiff[kCGImagePropertyTIFFDateTime] as? String,
-               let currentDate = parseExifDate(current),
-               abs(currentDate.timeIntervalSince(target)) > tolerance {
-                overrides[kCGImagePropertyTIFFDictionary] = [kCGImagePropertyTIFFDateTime: kCFNull]
-            } else {
-                overrides[kCGImagePropertyTIFFDictionary] = [kCGImagePropertyTIFFDateTime: formattedDate]
-            }
-        }
-
-        return (overrides, didUpdate)
+    private static func hasValue(for field: ExifDateCodec.Field, in properties: [CFString: Any]) -> Bool {
+        (properties[field.dictionary] as? [CFString: Any])?[field.dateKey] != nil
     }
 
-    private static func hasStaleEmbeddedCreationDates(at url: URL, target: Date) -> Bool {
+    private static func embeddedFields(at url: URL) -> [(field: ExifDateCodec.Field, value: Date)] {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
-            return false
+            return []
         }
-        let tolerance = FileDateRepairPlanner.timestampTolerance
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            for key in [kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifDateTimeDigitized] {
-                if let value = exif[key] as? String,
-                   let date = parseExifDate(value),
-                   abs(date.timeIntervalSince(target)) > tolerance {
-                    return true
-                }
-            }
+        return ExifDateCodec.Field.all.compactMap { field in
+            ExifDateCodec.date(for: field, in: properties).map { (field, $0) }
         }
-        if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
-           let value = tiff[kCGImagePropertyTIFFDateTime] as? String,
-           let date = parseExifDate(value),
-           abs(date.timeIntervalSince(target)) > tolerance {
-            return true
-        }
-        return false
     }
 
     /// Restores a previously captured filesystem date pair after an unsuccessful repair.
@@ -282,43 +218,8 @@ enum FileDatePreservation {
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return nil
         }
-
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
-           let original = exif[kCGImagePropertyExifDateTimeOriginal] as? String,
-           let date = parseExifDate(original) {
-            return date
-        }
-
-        if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
-           let tiffDate = tiff[kCGImagePropertyTIFFDateTime] as? String,
-           let date = parseExifDate(tiffDate) {
-            return date
-        }
-
-        return nil
-    }
-
-    private static func parseExifDate(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        return formatter.date(from: value)
-    }
-
-    private static func formatExifDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        return formatter.string(from: date)
-    }
-
-    private static func formatExifOffset(for date: Date) -> String {
-        let seconds = TimeZone.current.secondsFromGMT(for: date)
-        let sign = seconds >= 0 ? "+" : "-"
-        let absolute = abs(seconds)
-        return String(format: "%@%02d:%02d", sign, absolute / 3600, (absolute % 3600) / 60)
+        return ExifDateCodec.date(for: .original, in: properties)
+            ?? ExifDateCodec.date(for: .tiff, in: properties)
     }
 
     /// Updates Finder's Date Created and Date Modified.

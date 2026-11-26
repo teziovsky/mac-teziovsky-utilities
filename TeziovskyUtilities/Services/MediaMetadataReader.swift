@@ -111,9 +111,7 @@ enum MediaMetadataReader {
             snapshot.dimensions = "\(width) × \(height)"
         }
 
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
-           let original = exif[kCGImagePropertyExifDateTimeOriginal] as? String,
-           let date = parseExifDate(original) {
+        if let date = ExifDateCodec.date(for: .original, in: properties) {
             snapshot.containerCreationDate = date
         }
     }
@@ -127,38 +125,13 @@ enum MediaMetadataReader {
 
         // Only the primary image is used. Auxiliary HEIC/JPEG frames often keep stale
         // timestamps through ImageIO rewrites and would falsely fail verification.
-        var evidence: [FileDateEvidence] = []
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            appendDate(
-                exif[kCGImagePropertyExifDateTimeOriginal],
-                source: .exifOriginal,
-                to: &evidence
-            )
-            appendDate(
-                exif[kCGImagePropertyExifDateTimeDigitized],
-                source: .exifDigitized,
-                to: &evidence
-            )
+        // Each field is read with its own EXIF offset so photos from other time zones
+        // are not shifted by the difference to the Mac's current zone.
+        return ExifDateCodec.Field.all.compactMap { field in
+            ExifDateCodec.date(for: field, in: properties).map {
+                FileDateEvidence(source: field.source, date: $0)
+            }
         }
-        if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
-            appendDate(tiff[kCGImagePropertyTIFFDateTime], source: .tiffDateTime, to: &evidence)
-        }
-        return evidence
-    }
-
-    private static func appendDate(
-        _ rawValue: Any?,
-        source: FileDateSource,
-        to evidence: inout [FileDateEvidence]
-    ) {
-        guard let value = rawValue as? String, let date = parseExifDate(value) else { return }
-        guard !evidence.contains(where: {
-            $0.source == source &&
-                abs($0.date.timeIntervalSince(date)) <= FileDateRepairPlanner.timestampTolerance
-        }) else {
-            return
-        }
-        evidence.append(FileDateEvidence(source: source, date: date))
     }
 
     private static func formatDuration(_ seconds: Double) -> String {
@@ -172,19 +145,17 @@ enum MediaMetadataReader {
         return String(format: "%d:%02d", minutes, secs)
     }
 
-    private static func parseExifDate(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        return formatter.date(from: value)
-    }
+    private static let isoFormatter = ISO8601DateFormatter()
+    private static let fractionalISOFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private static func parseDateString(_ value: String) -> Date? {
-        if let date = parseExifDate(value) { return date }
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: value) { return date }
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return iso.date(from: value)
+        // ISO 8601 first: it carries its own offset, which a plain EXIF parse would drop.
+        if let date = isoFormatter.date(from: value) { return date }
+        if let date = fractionalISOFormatter.date(from: value) { return date }
+        return ExifDateCodec.date(from: value)
     }
 }

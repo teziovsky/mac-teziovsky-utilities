@@ -458,25 +458,29 @@ final class LocalMediaConversionTests: XCTestCase {
         XCTAssertNil(item)
     }
 
-    func testPlansLegacyVideoUsingConfiguredContainerAndResolvesCollision() async throws {
-        let source = root.appendingPathComponent("clip.avi")
-        let occupied = root.appendingPathComponent("clip.mov")
-        try Data().write(to: source)
-        try Data().write(to: occupied)
-        let plannedCandidate = await LocalMediaConversionPlanner.makeCandidate(
-            fileURL: source,
-            relativePath: "clip.avi",
-            rootDirectory: root,
-            config: LocalMediaConversionConfig(keepOriginals: true, videoOutputContainer: .mov)
-        )
-        let candidate = try XCTUnwrap(plannedCandidate)
-        let item = try XCTUnwrap(
-            LocalMediaConversionPlanner.resolveCollisions([candidate], rootDirectory: root).first
-        )
+    func testPlannedConversionsThatShareADestinationGetDistinctNames() async throws {
+        let legacy = root.appendingPathComponent("clip.mov")
+        let rewrapped = root.appendingPathComponent("clip.m4v")
+        try await TestVideoFactory.makeVideo(at: legacy, seconds: 1, fileType: .mov, codec: .jpeg)
+        try await TestVideoFactory.makeVideo(at: rewrapped, seconds: 1, fileType: .m4v)
+        let config = LocalMediaConversionConfig(keepOriginals: true, videoOutputContainer: .mp4)
+        var candidates: [LocalMediaConversionItem] = []
+        for (url, name) in [(legacy, "clip.mov"), (rewrapped, "clip.m4v")] {
+            let planned = await LocalMediaConversionPlanner.makeCandidate(
+                fileURL: url,
+                relativePath: name,
+                rootDirectory: root,
+                config: config
+            )
+            candidates.append(try XCTUnwrap(planned, name))
+        }
 
-        XCTAssertEqual(item.kind, .legacyVideo(.mov, .h264))
-        XCTAssertEqual(item.destinationRelativePath, "clip (1).mov")
-        XCTAssertTrue(item.destinationWasRenamed)
+        let items = LocalMediaConversionPlanner.resolveCollisions(candidates, rootDirectory: root)
+
+        XCTAssertEqual(items.map(\.sourceRelativePath), ["clip.m4v", "clip.mov"])
+        XCTAssertEqual(items.map(\.destinationRelativePath), ["clip.mp4", "clip (1).mp4"])
+        XCTAssertEqual(items.map(\.kind), [.remuxVideo(.mp4), .legacyVideo(.mp4, .h264)])
+        XCTAssertEqual(items.map(\.destinationWasRenamed), [false, true])
     }
 
     func testConvertsHEICToVerifiedJPEGBeforeRemovingOriginal() async throws {

@@ -3,7 +3,15 @@ import UniformTypeIdentifiers
 
 /// Classifies files as media using UniformTypeIdentifiers.
 enum MediaFileClassifier {
+    /// Video containers recognised by extension even when no installed app declares a UTI
+    /// for them (e.g. MKV without IINA/VLC), so classification does not depend on the Mac.
+    static let knownVideoExtensions: Set<String> = [
+        "3gp", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "mxf",
+        "ogv", "qt", "vob", "webm", "wmv"
+    ]
+
     static func isMedia(_ filename: String) -> Bool {
+        if isVideo(filename) { return true }
         guard let type = utType(for: filename) else { return false }
         return type.conforms(to: .image)
             || type.conforms(to: .movie)
@@ -13,7 +21,13 @@ enum MediaFileClassifier {
     /// Movies and video streams only. `.audiovisualContent` is deliberately not used: it also
     /// matches pure audio (wav, m4a), which must not be treated or compressed as video.
     static func isVideo(_ filename: String) -> Bool {
-        guard let type = utType(for: filename) else { return false }
+        let ext = (filename as NSString).pathExtension
+        return isVideo(fileExtension: ext, type: utType(for: filename))
+    }
+
+    static func isVideo(fileExtension: String, type: UTType?) -> Bool {
+        if knownVideoExtensions.contains(fileExtension.lowercased()) { return true }
+        guard let type else { return false }
         return type.conforms(to: .movie) || type.conforms(to: .video)
     }
 

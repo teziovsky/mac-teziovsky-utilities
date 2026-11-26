@@ -5,6 +5,10 @@ struct FileDateScanOutput: Sendable {
     let conversionCandidate: LocalMediaConversionItem?
     let repairItem: FileDateRepairItem?
     let organizationCandidate: LocalMediaOrganizationItem?
+    /// True when the file is already where organizing would put it.
+    let isAlreadyOrganized: Bool
+    /// Non-fatal problems worth showing (unsupported conversion, unreachable year folder).
+    let notices: [FileDateRepairFailure]
     let failure: FileDateRepairFailure?
 }
 
@@ -44,53 +48,12 @@ enum FileDateRepairScanner {
                 let file = enumeration.files[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    try Task.checkCancellation()
-                    let conversionCandidate = await LocalMediaConversionPlanner.makeCandidate(
-                        fileURL: file.url,
-                        relativePath: file.relativePath,
-                        rootDirectory: directory,
-                        config: conversionConfig
+                    try await scanFile(
+                        file,
+                        directory: directory,
+                        conversionConfig: conversionConfig,
+                        groupsWithPhotos: livePhotoCompanions[file.relativePath] != nil
                     )
-                    do {
-                        let isVideo = LocalMediaConversionPlanner.isVideoCandidate(file.url)
-                        let evidence = try await MediaMetadataReader.readDateEvidence(
-                            url: file.url,
-                            isVideo: isVideo
-                        )
-                        let repairItem = FileDateRepairPlanner.makeItem(
-                            fileURL: file.url,
-                            relativePath: file.relativePath,
-                            evidence: evidence
-                        )
-                        let organizationCandidate = LocalMediaOrganizationPlanner.makeCandidate(
-                            fileURL: file.url,
-                            relativePath: file.relativePath,
-                            rootDirectory: directory,
-                            evidence: evidence,
-                            isVideo: isVideo,
-                            groupsWithPhotos: livePhotoCompanions[file.relativePath] != nil
-                        )
-                        return FileDateScanOutput(
-                            relativePath: file.relativePath,
-                            conversionCandidate: conversionCandidate,
-                            repairItem: repairItem,
-                            organizationCandidate: organizationCandidate,
-                            failure: nil
-                        )
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        return FileDateScanOutput(
-                            relativePath: file.relativePath,
-                            conversionCandidate: conversionCandidate,
-                            repairItem: nil,
-                            organizationCandidate: nil,
-                            failure: FileDateRepairFailure(
-                                relativePath: file.relativePath,
-                                message: error.localizedDescription
-                            )
-                        )
-                    }
                 }
             }
 
@@ -104,9 +67,8 @@ enum FileDateRepairScanner {
                 if let item = output.conversionCandidate { conversionCandidates.append(item) }
                 if let item = output.repairItem { items.append(item) }
                 if let item = output.organizationCandidate { organizationCandidates.append(item) }
-                if output.organizationCandidate == nil, output.failure == nil {
-                    organizationSkippedCount += 1
-                }
+                if output.isAlreadyOrganized { organizationSkippedCount += 1 }
+                failures.append(contentsOf: output.notices)
                 if let failure = output.failure { failures.append(failure) }
                 if processed == enumeration.files.count || processed.isMultiple(of: 20) {
                     await progress(
@@ -138,6 +100,95 @@ enum FileDateRepairScanner {
         )
     }
 
+    private static func scanFile(
+        _ file: (url: URL, relativePath: String),
+        directory: URL,
+        conversionConfig: LocalMediaConversionConfig,
+        groupsWithPhotos: Bool
+    ) async throws -> FileDateScanOutput {
+        try Task.checkCancellation()
+        var notices: [FileDateRepairFailure] = []
+        var conversionCandidate: LocalMediaConversionItem?
+        switch await LocalMediaConversionPlanner.plan(
+            fileURL: file.url,
+            relativePath: file.relativePath,
+            rootDirectory: directory,
+            config: conversionConfig
+        ) {
+        case .convert(let item):
+            conversionCandidate = item
+        case .notNeeded:
+            break
+        case .unsupported(let reason):
+            notices.append(FileDateRepairFailure(relativePath: file.relativePath, message: reason))
+        }
+
+        do {
+            let isVideo = LocalMediaConversionPlanner.isVideoCandidate(file.url)
+            let evidence = try await MediaMetadataReader.readDateEvidence(url: file.url, isVideo: isVideo)
+            let repairItem = FileDateRepairPlanner.makeItem(
+                fileURL: file.url,
+                relativePath: file.relativePath,
+                evidence: evidence
+            )
+            var organizationCandidate: LocalMediaOrganizationItem?
+            var isAlreadyOrganized = false
+            switch LocalMediaOrganizationPlanner.plan(
+                fileURL: file.url,
+                relativePath: file.relativePath,
+                rootDirectory: directory,
+                evidence: evidence,
+                isVideo: isVideo,
+                groupsWithPhotos: groupsWithPhotos
+            ) {
+            case .move(let item):
+                organizationCandidate = item
+            case .unchanged:
+                isAlreadyOrganized = true
+            case .outsideScannedFolder(let year):
+                notices.append(FileDateRepairFailure(
+                    relativePath: file.relativePath,
+                    message: "Belongs in a “\(year)” folder next to the year folder above the scanned folder. "
+                        + "Scan the parent folder to move it there."
+                ))
+            }
+            return FileDateScanOutput(
+                relativePath: file.relativePath,
+                conversionCandidate: conversionCandidate,
+                repairItem: repairItem,
+                organizationCandidate: organizationCandidate,
+                isAlreadyOrganized: isAlreadyOrganized,
+                notices: notices,
+                failure: nil
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return FileDateScanOutput(
+                relativePath: file.relativePath,
+                conversionCandidate: conversionCandidate,
+                repairItem: nil,
+                organizationCandidate: nil,
+                isAlreadyOrganized: false,
+                notices: notices,
+                failure: FileDateRepairFailure(relativePath: file.relativePath, message: error.localizedDescription)
+            )
+        }
+    }
+
+    /// Hidden files written next to media by interrupted operations. They are never scanned
+    /// as media, but reported so a crash cannot leave an unnoticed copy of a user's file.
+    static func leftoverMessage(forHiddenName name: String) -> String? {
+        if name.hasPrefix(".date-repair-backup-") {
+            return "Backup left by an interrupted date repair. If the file it belongs to is damaged, "
+                + "restore it from this copy; otherwise delete it."
+        }
+        if name.hasPrefix(".image-metadata-") || name.hasPrefix(".video-metadata-") || name.hasPrefix(".metadata-") {
+            return "Temporary file left by an interrupted metadata update. It is safe to delete."
+        }
+        return nil
+    }
+
     private static func enumerateFiles(
         in directory: URL,
         supportedExtensions: Set<String>,
@@ -153,7 +204,8 @@ enum FileDateRepairScanner {
         guard let enumerator = fileManager.enumerator(
             at: directory,
             includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            // Hidden entries are filtered below so leftovers of interrupted repairs can be reported.
+            options: [.skipsPackageDescendants],
             errorHandler: { url, error in
                 failures.append(
                     FileDateRepairFailure(
@@ -177,6 +229,18 @@ enum FileDateRepairScanner {
             try Task.checkCancellation()
             do {
                 let values = try url.resourceValues(forKeys: Set(keys))
+                if url.lastPathComponent.hasPrefix(".") {
+                    if values.isDirectory == true {
+                        enumerator.skipDescendants()
+                    } else if values.isRegularFile == true,
+                              let message = leftoverMessage(forHiddenName: url.lastPathComponent) {
+                        failures.append(FileDateRepairFailure(
+                            relativePath: relativePath(for: url, root: directory),
+                            message: message
+                        ))
+                    }
+                    continue
+                }
                 if values.isSymbolicLink == true || values.isPackage == true {
                     if values.isDirectory == true { enumerator.skipDescendants() }
                     continue

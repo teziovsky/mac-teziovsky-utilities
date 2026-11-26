@@ -514,6 +514,7 @@ private struct LocalMediaConversionRow: View {
         switch item.kind {
         case .heicToJPEG: return "photo.badge.arrow.down"
         case .legacyVideo: return "film.stack"
+        case .remuxVideo: return "shippingbox"
         }
     }
 }

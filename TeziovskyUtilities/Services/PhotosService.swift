@@ -39,6 +39,8 @@ final class PhotosService: NSObject, ObservableObject {
     private var changeObserverRegistered = false
     /// Counted so overlapping Organize runs (cancel + restart) cannot end each other's deferral.
     private var albumReloadDeferrals = 0
+    private var albumIdentifiersByTitle: [String: String] = [:]
+    private var pendingLibraryReload: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -96,7 +98,8 @@ final class PhotosService: NSObject, ObservableObject {
         await reloadAlbums()
     }
 
-    func mediaItems(for album: PhotoAlbum) async throws -> [MediaItem] {
+    /// Items and their assets, fetched in one background pass (the grid needs both).
+    func albumContents(for album: PhotoAlbum) async throws -> AlbumContents {
         guard canAccessLibrary else {
             if authorizationState == .limited {
                 throw PhotosServiceError.limitedAccess
@@ -107,20 +110,8 @@ final class PhotosService: NSObject, ObservableObject {
             throw PhotosServiceError.albumNotFound(album.name)
         }
         return await Task.detached(priority: .userInitiated) {
-            Self.fetchMediaItems(in: collection)
+            Self.fetchContents(in: collection)
         }.value
-    }
-
-    static func buildAssetCache(for items: [MediaItem]) -> [String: PHAsset] {
-        guard !items.isEmpty else { return [:] }
-        let ids = items.map(\.id)
-        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-        var cache: [String: PHAsset] = [:]
-        cache.reserveCapacity(fetch.count)
-        fetch.enumerateObjects { asset, _, _ in
-            cache[asset.localIdentifier] = asset
-        }
-        return cache
     }
 
     static func destinationAlbumTitle(forSourceAlbumNamed sourceName: String) -> String? {
@@ -155,8 +146,24 @@ final class PhotosService: NSObject, ObservableObject {
         try await Self.performMove(
             asset: asset,
             sourceCollection: sourceCollection,
-            targetAlbumTitle: targetTitle
+            targetCollection: try await targetCollection(titled: targetTitle)
         )
+    }
+
+    /// Resolves the "done" album once per title instead of scanning every album per asset.
+    private func targetCollection(titled title: String) async throws -> PHAssetCollection {
+        if let identifier = albumIdentifiersByTitle[title],
+           let cached = Self.fetchCollection(identifier: identifier) {
+            return cached
+        }
+        let collection: PHAssetCollection
+        if let existing = Self.fetchCollection(title: title) {
+            collection = existing
+        } else {
+            collection = try await Self.createAlbum(title: title)
+        }
+        albumIdentifiersByTitle[title] = collection.localIdentifier
+        return collection
     }
 
     private func registerChangeObserverIfNeeded() {
@@ -262,15 +269,8 @@ final class PhotosService: NSObject, ObservableObject {
     nonisolated private static func performMove(
         asset: PHAsset,
         sourceCollection: PHAssetCollection,
-        targetAlbumTitle: String
+        targetCollection: PHAssetCollection
     ) async throws {
-        let targetCollection: PHAssetCollection
-        if let existing = fetchCollection(title: targetAlbumTitle) {
-            targetCollection = existing
-        } else {
-            targetCollection = try await createAlbum(title: targetAlbumTitle)
-        }
-
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             PHPhotoLibrary.shared().performChanges {
                 PHAssetCollectionChangeRequest(for: targetCollection)?
@@ -318,12 +318,14 @@ final class PhotosService: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private static func fetchMediaItems(in collection: PHAssetCollection) -> [MediaItem] {
+    nonisolated private static func fetchContents(in collection: PHAssetCollection) -> AlbumContents {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         let assets = PHAsset.fetchAssets(in: collection, options: options)
         var items: [MediaItem] = []
+        var assetsByID: [String: PHAsset] = [:]
         items.reserveCapacity(assets.count)
+        assetsByID.reserveCapacity(assets.count)
 
         var index = 0
         while index < assets.count {
@@ -336,9 +338,10 @@ final class PhotosService: NSObject, ObservableObject {
                     creationDate: asset.creationDate
                 )
             )
+            assetsByID[asset.localIdentifier] = asset
             index += 1
         }
-        return items
+        return AlbumContents(items: items, assetsByID: assetsByID)
     }
 
     nonisolated private static func filename(for asset: PHAsset) -> String {
@@ -357,10 +360,28 @@ final class PhotosService: NSObject, ObservableObject {
 extension PhotosService: PHPhotoLibraryChangeObserver {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in
-            guard canAccessLibrary else { return }
-            guard albumReloadDeferrals == 0 else { return }
-            guard !isLoadingAlbums else { return }
+            scheduleLibraryReload()
+        }
+    }
+
+    /// iCloud sync delivers bursts of changes; reload once the burst settles instead of per
+    /// change, and retry rather than drop a change that arrives mid-reload.
+    private func scheduleLibraryReload() {
+        pendingLibraryReload?.cancel()
+        pendingLibraryReload = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            guard let self, !Task.isCancelled, canAccessLibrary, albumReloadDeferrals == 0 else { return }
+            if isLoadingAlbums {
+                scheduleLibraryReload()
+                return
+            }
             await reloadAlbums()
         }
     }
+}
+
+/// An album's grid items and their assets. PHAsset is immutable and safe to read from any thread.
+struct AlbumContents: @unchecked Sendable {
+    let items: [MediaItem]
+    let assetsByID: [String: PHAsset]
 }

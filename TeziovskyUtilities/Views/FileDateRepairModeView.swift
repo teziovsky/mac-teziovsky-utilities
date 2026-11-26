@@ -21,7 +21,7 @@ struct LocalPhotosModeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var step: LocalPhotosWorkflowStep = .convert
 
-    private var service: LocalPhotosService { appState.localPhotosService }
+    @ObservedObject var service: LocalPhotosService
 
     var body: some View {
         ScrollView {

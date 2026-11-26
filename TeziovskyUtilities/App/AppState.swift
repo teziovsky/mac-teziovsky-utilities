@@ -44,11 +44,8 @@ final class AppState: ObservableObject {
         organizeExporter.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
-        droneWorkflow.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-        localPhotosService.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
+        // Drone and Local Photos are observed directly by their views: forwarding their
+        // progress ticks here would re-render every view that depends on AppState.
     }
 
     func bootstrap() async {
@@ -132,10 +129,10 @@ final class AppState: ObservableObject {
         await ThumbnailLoader.shared.clearMemoryCache(forAlbumID: album.id)
 
         do {
-            let items = try await photosService.mediaItems(for: album)
+            let contents = try await photosService.albumContents(for: album)
             guard generation == albumLoadGeneration else { return }
-            mediaItems = items
-            currentAlbumAssets = PhotosService.buildAssetCache(for: items)
+            mediaItems = contents.items
+            currentAlbumAssets = contents.assetsByID
             selectedMediaID = mediaItems.first?.id
         } catch {
             guard generation == albumLoadGeneration else { return }

@@ -16,9 +16,9 @@ struct RootView: View {
                 case .photos:
                     PhotosModeView()
                 case .drone:
-                    DroneModeView()
+                    DroneModeView(workflow: appState.droneWorkflow)
                 case .localPhotos:
-                    LocalPhotosModeView()
+                    LocalPhotosModeView(service: appState.localPhotosService)
                 }
             }
         }

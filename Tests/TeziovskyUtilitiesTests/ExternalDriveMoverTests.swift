@@ -131,6 +131,16 @@ final class ExternalDriveMoverTests: XCTestCase {
         }
     }
 
+    /// exFAT's copyfile drops UF_HIDDEN; the mover must put the source's flags back.
+    func testFlagsDroppedByTheCopyAreRestored() throws {
+        let source = try makeSource("hidden.jpg", hidden: true)
+        let before = try FileMetadataFingerprint.read(source, includeContent: true)
+        let copier = HookCopier { partial in XCTAssertEqual(lchflags(partial.path, 0), 0) }
+
+        XCTAssertEqual(try move(["hidden.jpg"], mover: ExternalDriveMover(copier: copier, trash: trash.trash)), .moved)
+        XCTAssertEqual(try identical(before, dst.appendingPathComponent("hidden.jpg")), [])
+    }
+
     func testDestinationExistsIsNeverOverwritten() throws {
         try makeSource("a.jpg")
         let destination = dst.appendingPathComponent("a.jpg")
@@ -315,6 +325,11 @@ final class ExternalDriveMoverTests: XCTestCase {
         XCTAssertTrue(exists(source))
     }
 
+}
+
+// MARK: - Already on the destination, and the exFAT rename fallback
+
+extension ExternalDriveMoverTests {
     func testTrashOriginalIfIdenticalTrashesOnlyWhenIdentical() throws {
         // An identical copy: a move whose trash step failed leaves one behind.
         let source = try makeSource("same.jpg")
@@ -352,6 +367,27 @@ final class ExternalDriveMoverTests: XCTestCase {
 
         XCTAssertTrue(exists(source))
         XCTAssertTrue(trash.trashed.isEmpty)
+    }
+
+    /// exFAT (FSKit) has no RENAME_EXCL; the fallback must still never replace an existing file.
+    func testRenameFallbackWithoutExclusiveRenameNeverReplaces() throws {
+        let partial = dst.appendingPathComponent(".a.jpg.partial")
+        let final = dst.appendingPathComponent("a.jpg")
+        try Data("copy".utf8).write(to: partial)
+
+        XCTAssertNil(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: final))
+        XCTAssertEqual(try Data(contentsOf: final), Data("copy".utf8))
+        XCTAssertFalse(exists(partial))
+
+        try Data("second".utf8).write(to: partial)
+        XCTAssertEqual(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: final)?.code, .EEXIST)
+        XCTAssertEqual(try Data(contentsOf: final), Data("copy".utf8))
+        XCTAssertEqual(try Data(contentsOf: partial), Data("second".utf8))
+
+        let link = dst.appendingPathComponent("link.jpg")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/nonexistent/x")
+        XCTAssertEqual(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: link)?.code, .EEXIST)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), "/nonexistent/x")
     }
 
     func testUnicodePathsRoundTrip() throws {

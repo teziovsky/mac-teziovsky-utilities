@@ -375,10 +375,20 @@ private struct DroneSettingsTab: View {
     var body: some View {
         Form {
             Section("External tools") {
-                TextField("HandBrakeCLI path", text: $handBrakeCLIPath)
-                    .help("Leave blank to auto-detect Homebrew or HandBrake.app.")
-                TextField("DaVinci Resolve app path", text: $resolveAppPath)
-                    .help("Leave blank to auto-detect in /Applications.")
+                ToolPathField(
+                    title: "HandBrakeCLI",
+                    path: $handBrakeCLIPath,
+                    kind: .commandLineTool,
+                    status: DroneToolPaths.handBrakeStatus(configuredPath: handBrakeCLIPath),
+                    missingHint: "Install it with “brew install handbrake” or download HandBrakeCLI from handbrake.fr."
+                )
+                ToolPathField(
+                    title: "DaVinci Resolve",
+                    path: $resolveAppPath,
+                    kind: .application,
+                    status: DroneToolPaths.resolveStatus(configuredPath: resolveAppPath),
+                    missingHint: "Choose the app if it is installed outside /Applications."
+                )
             }
 
             Section("Compressed files") {

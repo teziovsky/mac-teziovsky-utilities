@@ -71,6 +71,7 @@
 		A0010000000000000000F0A4 /* ExternalDriveRunViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A4 /* ExternalDriveRunViews.swift */; };
 		A0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift */; };
 		A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000003 /* FileDateRepairModeView.swift */; };
+		A00200000000000000000C01 /* LocalMediaKeptSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000C01 /* LocalMediaKeptSection.swift */; };
 		873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */; };
 		A00300000000000000000001 /* LocalMediaConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000001 /* LocalMediaConversion.swift */; };
 		A00300000000000000000099 /* HEVCRetagger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000099 /* HEVCRetagger.swift */; };
@@ -147,6 +148,7 @@
 		B0010000000000000000F0A4 /* ExternalDriveRunViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveRunViews.swift; sourceTree = "<group>"; };
 		B0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveSettingsTab.swift; sourceTree = "<group>"; };
 		B00200000000000000000003 /* FileDateRepairModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModeView.swift; sourceTree = "<group>"; };
+		B00200000000000000000C01 /* LocalMediaKeptSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaKeptSection.swift; sourceTree = "<group>"; };
 		7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaListComponents.swift; sourceTree = "<group>"; };
 		B00300000000000000000001 /* LocalMediaConversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaConversion.swift; sourceTree = "<group>"; };
 		B00300000000000000000099 /* HEVCRetagger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCRetagger.swift; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 				B0010000000000000000F0A4 /* ExternalDriveRunViews.swift */,
 				B0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift */,
 				B00200000000000000000003 /* FileDateRepairModeView.swift */,
+				B00200000000000000000C01 /* LocalMediaKeptSection.swift */,
 				7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */,
 			);
 			path = Views;
@@ -433,6 +436,7 @@
 				A0010000000000000000F0A4 /* ExternalDriveRunViews.swift in Sources */,
 				A0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift in Sources */,
 				A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */,
+				A00200000000000000000C01 /* LocalMediaKeptSection.swift in Sources */,
 				873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */,
 				A00300000000000000000001 /* LocalMediaConversion.swift in Sources */,
 				A00300000000000000000099 /* HEVCRetagger.swift in Sources */,

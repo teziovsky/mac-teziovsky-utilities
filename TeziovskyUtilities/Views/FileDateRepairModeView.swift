@@ -576,6 +576,9 @@ private struct LocalMediaOrganizationPreviewCard: View {
                         }
                     }
                 }
+                if !service.keptItems.isEmpty {
+                    LocalMediaKeptSection(items: service.keptItems)
+                }
             }
         }
         .confirmationDialog(

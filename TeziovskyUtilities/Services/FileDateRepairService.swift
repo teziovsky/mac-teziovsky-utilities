@@ -11,6 +11,8 @@ struct FileDateScanOutput: Sendable {
     let hasUsableDate: Bool
     /// The year the file belongs to when that year folder is outside the scanned folder.
     let outsideScannedFolderYear: String?
+    /// Set when the file stays in its year folder because only file-system dates disagree.
+    var keptItem: LocalMediaKeptItem?
     /// Non-fatal problems worth showing (unsupported conversion, unreachable year folder).
     let notices: [FileDateRepairFailure]
     let failure: FileDateRepairFailure?
@@ -27,6 +29,7 @@ struct FileDateScanResult: Sendable {
     let items: [FileDateRepairItem]
     let organizationItems: [LocalMediaOrganizationItem]
     let organizationSkippedCount: Int
+    let keptItems: [LocalMediaKeptItem]
     let failures: [FileDateRepairFailure]
     let scannedFileCount: Int
 }
@@ -51,12 +54,14 @@ enum FileDateRepairScanner {
         var items: [FileDateRepairItem] = []
         var organizationCandidates: [LocalMediaOrganizationItem] = []
         var organizationSkippedCount = 0
+        var keptItems: [LocalMediaKeptItem] = []
 
         for output in scanned.outputs {
             if let item = output.conversionCandidate { conversionCandidates.append(item) }
             if let item = output.repairItem { items.append(item) }
             if let item = output.organizationCandidate { organizationCandidates.append(item) }
             if output.isAlreadyOrganized { organizationSkippedCount += 1 }
+            if let kept = output.keptItem { keptItems.append(kept) }
             failures.append(contentsOf: output.notices)
             if let failure = output.failure { failures.append(failure) }
         }
@@ -73,6 +78,9 @@ enum FileDateRepairScanner {
                 livePhotoCompanions: scanned.livePhotoCompanions
             ),
             organizationSkippedCount: organizationSkippedCount,
+            keptItems: keptItems.sorted {
+                $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
+            },
             failures: failures,
             scannedFileCount: scanned.outputs.count
         )
@@ -170,6 +178,7 @@ enum FileDateRepairScanner {
             var organizationCandidate: LocalMediaOrganizationItem?
             var isAlreadyOrganized = false
             var outsideYear: String?
+            var keptItem: LocalMediaKeptItem?
             switch LocalMediaOrganizationPlanner.plan(
                 fileURL: file.url,
                 relativePath: file.relativePath,
@@ -180,8 +189,11 @@ enum FileDateRepairScanner {
             ) {
             case .move(let item):
                 organizationCandidate = item
-            case .unchanged, .kept:
+            case .unchanged:
                 isAlreadyOrganized = true
+            case .kept(let item):
+                isAlreadyOrganized = true
+                keptItem = item
             case .outsideScannedFolder(let year):
                 outsideYear = year
                 notices.append(FileDateRepairFailure(
@@ -198,6 +210,7 @@ enum FileDateRepairScanner {
                 isAlreadyOrganized: isAlreadyOrganized,
                 hasUsableDate: FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence) != nil,
                 outsideScannedFolderYear: outsideYear,
+                keptItem: keptItem,
                 notices: notices,
                 failure: nil
             )
@@ -408,12 +421,14 @@ enum LocalMediaListFilter {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class LocalPhotosService: ObservableObject {
     @Published private(set) var directory: URL?
     @Published private(set) var conversionItems: [LocalMediaConversionItem] = []
     @Published private(set) var items: [FileDateRepairItem] = []
     @Published private(set) var organizationItems: [LocalMediaOrganizationItem] = []
     @Published private(set) var organizationSkippedCount = 0
+    @Published private(set) var keptItems: [LocalMediaKeptItem] = []
     @Published private(set) var failures: [FileDateRepairFailure] = []
     @Published private(set) var progress = FileDateRepairProgress()
     @Published private(set) var conversionProgress = FileDateRepairProgress()
@@ -520,6 +535,7 @@ final class LocalPhotosService: ObservableObject {
                 items = result.items
                 organizationItems = result.organizationItems
                 organizationSkippedCount = result.organizationSkippedCount
+                keptItems = result.keptItems
                 failures = result.failures
                 scannedFileCount = result.scannedFileCount
                 lastScanCompleted = true
@@ -672,6 +688,7 @@ final class LocalPhotosService: ObservableObject {
                 items = refreshed.items
                 organizationItems = refreshed.organizationItems
                 organizationSkippedCount = refreshed.organizationSkippedCount
+                keptItems = refreshed.keptItems
                 failures = moveFailures + refreshed.failures
                 scannedFileCount = refreshed.scannedFileCount
             } catch is CancellationError {
@@ -724,6 +741,7 @@ final class LocalPhotosService: ObservableObject {
         items = []
         organizationItems = []
         organizationSkippedCount = 0
+        keptItems = []
         failures = []
         progress = FileDateRepairProgress()
         conversionProgress = FileDateRepairProgress()
@@ -821,6 +839,7 @@ extension LocalPhotosService {
                 items = refreshed.items
                 organizationItems = refreshed.organizationItems
                 organizationSkippedCount = refreshed.organizationSkippedCount
+                keptItems = refreshed.keptItems
                 failures = conversionFailures + refreshed.failures
                 scannedFileCount = refreshed.scannedFileCount
             } catch is CancellationError {

@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 @testable import TeziovskyUtilities
 import XCTest
 
@@ -151,6 +153,64 @@ final class YearFolderTrustTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    // MARK: Kept files through the scanner
+
+    func testKeptFileCountsAsAlreadyOrganized() async throws {
+        try makeUndatedJPEG("2014/a.jpg", finderDate: Date(timeIntervalSince1970: 1_751_540_400))
+
+        let result = try await FileDateRepairScanner.scan(
+            directory: root,
+            supportedExtensions: ["jpg"],
+            progress: { _ in }
+        )
+
+        XCTAssertTrue(result.organizationItems.isEmpty)
+        XCTAssertEqual(result.keptItems.map(\.relativePath), ["2014/a.jpg"])
+        XCTAssertEqual(result.keptItems.first?.yearFolder, "2014")
+        XCTAssertEqual(result.organizationSkippedCount, 1)
+    }
+
+    func testKeptFileIsReadyForExternalDriveTransfer() async throws {
+        try makeUndatedJPEG("2014/a.jpg", finderDate: Date(timeIntervalSince1970: 1_751_540_400))
+
+        let scanned = try await FileDateRepairScanner.scanOutputs(
+            directory: root,
+            supportedExtensions: ["jpg"],
+            progress: { _ in }
+        )
+        let output = try XCTUnwrap(scanned.outputs.first)
+        XCTAssertNotNil(output.keptItem)
+        XCTAssertTrue(output.isAlreadyOrganized)
+
+        let review = ExternalDriveClassifier.classify(
+            scanned,
+            otherFiles: [],
+            byteCount: { _ in 10 },
+            existsOnDestination: { _ in false }
+        )
+        XCTAssertEqual(review.entries.map(\.bucket), [.ready])
+    }
+
+    private func makeUndatedJPEG(_ relativePath: String, finderDate: Date) throws {
+        let url = root.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
+        )
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        try FileDatePreservation.applyFileDates(to: url, created: finderDate, modified: finderDate)
+    }
 
     private func plan(
         _ relativePath: String,

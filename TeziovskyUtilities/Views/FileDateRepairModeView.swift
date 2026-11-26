@@ -7,42 +7,19 @@ struct LocalPhotosModeView: View {
 
     @ObservedObject var service: LocalPhotosService
 
+    private static let topID = "local-photos-top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                folderCard
-                if service.isRunning {
-                    progressCard
-                }
-                if service.directory != nil, !service.isScanning {
-                    if service.lastScanCompleted {
-                        workflowSteps
-                        switch service.workflowStep {
-                        case .convert:
-                            conversionCard
-                        case .repair:
-                            resultsCard
-                        case .organize:
-                            organizationCard
-                        case .complete:
-                            completionCard
-                        }
-                    } else {
-                        LocalMediaIncompleteScanCard(
-                            message: service.cancellationMessage
-                                ?? "The folder could not be scanned completely. Check the issues below and rescan.",
-                            rescan: rescan
-                        )
-                    }
-                }
-                if !service.failures.isEmpty {
-                    failuresCard
+        ScrollViewReader { proxy in
+            ScrollView {
+                content
+            }
+            .onChange(of: service.workflowStep) { _, _ in
+                // Each step's buttons sit at the top of its card; bring them into view.
+                withAnimation(.smooth(duration: 0.25)) {
+                    proxy.scrollTo(Self.topID, anchor: .top)
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 1_000, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
         .navigationTitle(AppBranding.localPhotosModeTitle)
         .searchable(text: $filter, placement: .toolbar, prompt: "Filter files")
@@ -61,6 +38,44 @@ struct LocalPhotosModeView: View {
                 service.reset()
             }
         }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            header
+                .id(Self.topID)
+            folderCard
+            if service.isRunning {
+                progressCard
+            }
+            if service.directory != nil, !service.isScanning {
+                if service.lastScanCompleted {
+                    workflowSteps
+                    switch service.workflowStep {
+                    case .convert:
+                        conversionCard
+                    case .repair:
+                        resultsCard
+                    case .organize:
+                        organizationCard
+                    case .complete:
+                        completionCard
+                    }
+                } else {
+                    LocalMediaIncompleteScanCard(
+                        message: service.cancellationMessage
+                            ?? "The folder could not be scanned completely. Check the issues below and rescan.",
+                        rescan: rescan
+                    )
+                }
+            }
+            if !service.failures.isEmpty {
+                failuresCard
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 1_000, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
@@ -176,6 +191,7 @@ struct LocalPhotosModeView: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 16) {
                 resultSummary
+                repairNavigation
 
                 if !service.items.isEmpty {
                     Divider()
@@ -198,28 +214,29 @@ struct LocalPhotosModeView: View {
                         }
                     }
                 }
-
-                Divider()
-                HStack {
-                    Button("Back to Conversion Preview") {
-                        appState.run(.back)
-                    }
-                    .pillActionButton()
-                    .help("Back to the conversion preview (⌘[ or Esc)")
-                    .disabled(service.isRunning)
-                    Text("Continue when the date-repair preview has been reviewed.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Continue to Organize Preview") {
-                        service.workflowStep = .organize
-                    }
-                    .pillActionButton(prominent: true)
-                    .keyboardShortcut(.defaultAction)
-                    .help("Continue to the organize preview (↩)")
-                    .disabled(service.isRunning)
-                }
             }
+        }
+    }
+
+    private var repairNavigation: some View {
+        HStack {
+            Button("Back to Conversion Preview") {
+                appState.run(.back)
+            }
+            .pillActionButton()
+            .help("Back to the conversion preview (⌘[ or Esc)")
+            .disabled(service.isRunning)
+            Text("Continue when the date-repair preview has been reviewed.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Continue to Organize Preview") {
+                service.workflowStep = .organize
+            }
+            .pillActionButton(prominent: true)
+            .keyboardShortcut(.defaultAction)
+            .help("Continue to the organize preview (↩)")
+            .disabled(service.isRunning)
         }
     }
 
@@ -381,7 +398,9 @@ private struct LocalMediaConversionPreviewCard: View {
 
                 if service.conversionItems.isEmpty {
                     conversionCompleteLabel
-                } else {
+                }
+                navigation
+                if !service.conversionItems.isEmpty {
                     Divider()
                     LocalMediaFilteredList(
                         items: service.conversionItems,
@@ -398,30 +417,6 @@ private struct LocalMediaConversionPreviewCard: View {
                         }
                     }
                 }
-
-                Divider()
-                HStack {
-                    if !service.conversionItems.isEmpty {
-                        Button("Skip Conversion", action: continueWithoutConversion)
-                            .pillActionButton()
-                            .disabled(service.isRunning)
-                    }
-                    Spacer()
-                    if service.conversionItems.isEmpty {
-                        Button("Continue to Date Preview", action: continueWithoutConversion)
-                            .pillActionButton(prominent: true)
-                            .keyboardShortcut(.defaultAction)
-                            .help("Continue to the date preview (↩)")
-                    } else {
-                        Button("Convert \(service.includedConversionItems.count) Files…") {
-                            confirmsConversion = true
-                        }
-                        .pillActionButton(prominent: true)
-                        .keyboardShortcut(.defaultAction)
-                        .help("Convert the files in this preview (↩)")
-                        .disabled(service.isRunning || service.includedConversionItems.isEmpty)
-                    }
-                }
             }
         }
         .confirmationDialog(
@@ -436,6 +431,31 @@ private struct LocalMediaConversionPreviewCard: View {
             Text("Files convert exactly as shown in the preview. Originals marked "
                 + "“Original removed after verification” are permanently deleted once their "
                 + "converted copy checks out.")
+        }
+    }
+
+    private var navigation: some View {
+        HStack {
+            if !service.conversionItems.isEmpty {
+                Button("Skip Conversion", action: continueWithoutConversion)
+                    .pillActionButton()
+                    .disabled(service.isRunning)
+            }
+            Spacer()
+            if service.conversionItems.isEmpty {
+                Button("Continue to Date Preview", action: continueWithoutConversion)
+                    .pillActionButton(prominent: true)
+                    .keyboardShortcut(.defaultAction)
+                    .help("Continue to the date preview (↩)")
+            } else {
+                Button("Convert \(service.includedConversionItems.count) Files…") {
+                    confirmsConversion = true
+                }
+                .pillActionButton(prominent: true)
+                .keyboardShortcut(.defaultAction)
+                .help("Convert the files in this preview (↩)")
+                .disabled(service.isRunning || service.includedConversionItems.isEmpty)
+            }
         }
     }
 
@@ -537,7 +557,9 @@ private struct LocalMediaOrganizationPreviewCard: View {
                 if service.organizationItems.isEmpty {
                     Label("All scanned files are already organized.", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                } else {
+                }
+                navigation
+                if !service.organizationItems.isEmpty {
                     Divider()
                     LocalMediaFilteredList(
                         items: service.organizationItems,
@@ -554,16 +576,6 @@ private struct LocalMediaOrganizationPreviewCard: View {
                         }
                     }
                 }
-
-                Divider()
-                HStack {
-                    Button("Back to Date Preview", action: goBack)
-                        .pillActionButton()
-                        .help("Back to the date preview (⌘[ or Esc)")
-                        .disabled(service.isRunning)
-                    Spacer()
-                    primaryButton
-                }
             }
         }
         .confirmationDialog(
@@ -576,6 +588,17 @@ private struct LocalMediaOrganizationPreviewCard: View {
                 .keyboardShortcut(.defaultAction)
         } message: {
             Text("Every file moves exactly as shown in the preview.")
+        }
+    }
+
+    private var navigation: some View {
+        HStack {
+            Button("Back to Date Preview", action: goBack)
+                .pillActionButton()
+                .help("Back to the date preview (⌘[ or Esc)")
+                .disabled(service.isRunning)
+            Spacer()
+            primaryButton
         }
     }
 

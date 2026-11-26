@@ -76,8 +76,7 @@ struct DroneStepContainer<Content: View>: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                content()
-
+                // Actions come before the (often long) step content, so reaching them takes no scrolling.
                 HStack {
                     if isRunning {
                         ProgressView()
@@ -93,6 +92,8 @@ struct DroneStepContainer<Content: View>: View {
                         .help("\(actionTitle) (↩)")
                         .disabled(isRunning || actionDisabled)
                 }
+
+                content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

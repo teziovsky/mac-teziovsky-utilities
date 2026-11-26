@@ -9,63 +9,19 @@ struct DroneModeView: View {
     private var finalizer: DroneFinalizer { workflow.finalizer }
     private var config: DroneFinalizeConfig { AppSettings.droneFinalizeConfig }
 
+    private static let topID = "drone-top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                folderSection
-
-                if let error = workflow.previewError ?? finalizer.previewError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.callout)
-                }
-
-                if workflow.hasProject && workflow.previewError == nil && finalizer.previewError == nil {
-                    DroneWorkflowStepIndicator(current: workflow.phase)
-                        .frame(maxWidth: .infinity)
-                    phaseCard
-                    if !workflowFailures.isEmpty {
-                        DroneNotesBox(failures: workflowFailures)
-                    }
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                content
             }
-            .padding(24)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .onChange(of: workflow.phase) { _, _ in scrollToTop(proxy) }
+            .onChange(of: finalizer.step) { _, _ in scrollToTop(proxy) }
         }
         .navigationTitle(AppBranding.droneModeTitle)
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    appState.run(.home)
-                } label: {
-                    Label("Home", systemImage: "house")
-                }
-                .help("Back to the home screen (⇧⌘H)")
-            }
-
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    appState.run(.back)
-                } label: {
-                    Label("Go Back", systemImage: "chevron.backward")
-                }
-                .help("Go back one step (⌘[ or Esc). Never changes files.")
-                .disabled(!workflow.canGoBack || isBusy)
-            }
-
-            if workflow.canUndoFinalizeStep {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        appState.run(.undoFinalizeStep)
-                    } label: {
-                        Label("Undo Last Step", systemImage: "arrow.uturn.backward")
-                    }
-                    .help("Revert the last finalize step: restore trashed files and undo renames (⌥⌘Z)")
-                    .disabled(isBusy)
-                }
-            }
+            toolbarContent
         }
         .confirmationDialog(
             pendingDestructiveStep.map { "\($0.actionTitle)?" } ?? "",
@@ -90,6 +46,73 @@ struct DroneModeView: View {
         .onDisappear {
             if !isBusy {
                 workflow.reset()
+            }
+        }
+    }
+
+    /// Each step's buttons sit at the top of its card; bring them into view on a new step.
+    private func scrollToTop(_ proxy: ScrollViewProxy) {
+        withAnimation(.smooth(duration: 0.25)) {
+            proxy.scrollTo(Self.topID, anchor: .top)
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            header
+                .id(Self.topID)
+            folderSection
+
+            if let error = workflow.previewError ?? finalizer.previewError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+            }
+
+            if workflow.hasProject && workflow.previewError == nil && finalizer.previewError == nil {
+                DroneWorkflowStepIndicator(current: workflow.phase)
+                    .frame(maxWidth: .infinity)
+                phaseCard
+                if !workflowFailures.isEmpty {
+                    DroneNotesBox(failures: workflowFailures)
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 820, alignment: .leading)
+        .frame(maxWidth: .infinity)
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                appState.run(.home)
+            } label: {
+                Label("Home", systemImage: "house")
+            }
+            .help("Back to the home screen (⇧⌘H)")
+        }
+
+        ToolbarItem(placement: .navigation) {
+            Button {
+                appState.run(.back)
+            } label: {
+                Label("Go Back", systemImage: "chevron.backward")
+            }
+            .help("Go back one step (⌘[ or Esc). Never changes files.")
+            .disabled(!workflow.canGoBack || isBusy)
+        }
+
+        if workflow.canUndoFinalizeStep {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.run(.undoFinalizeStep)
+                } label: {
+                    Label("Undo Last Step", systemImage: "arrow.uturn.backward")
+                }
+                .help("Revert the last finalize step: restore trashed files and undo renames (⌥⌘Z)")
+                .disabled(isBusy)
             }
         }
     }
@@ -567,8 +590,7 @@ private struct DroneWorkflowStepContainer<Content: View>: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                content()
-
+                // Actions come before the (often long) step content, so reaching them takes no scrolling.
                 HStack {
                     if isRunning {
                         ProgressView()
@@ -586,8 +608,11 @@ private struct DroneWorkflowStepContainer<Content: View>: View {
                     Button(actionTitle, role: actionRole, action: action)
                         .pillActionButton(prominent: true)
                         .keyboardShortcut(.defaultAction)
+                        .help("\(actionTitle) (↩)")
                         .disabled(isRunning || actionDisabled)
                 }
+
+                content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

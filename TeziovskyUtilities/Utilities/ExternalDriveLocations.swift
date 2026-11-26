@@ -121,11 +121,18 @@ enum ExternalDriveLocations {
                   let boot = bootValues.volumeIdentifier as? NSObject,
                   volume != boot
             else { return message }
-            let free = values.volumeAvailableCapacityForImportantUsage
-                ?? values.volumeAvailableCapacity.map(Int64.init)
-                ?? 0
-            return .ready(freeBytes: free)
+            return .ready(freeBytes: freeBytes(
+                important: values.volumeAvailableCapacityForImportantUsage,
+                plain: values.volumeAvailableCapacity.map(Int64.init)
+            ))
         }
+    }
+
+    /// The larger of the two capacities: on the boot volume "important usage" includes
+    /// purgeable space, while external volumes (exFAT) report it as 0 and only the plain
+    /// capacity is meaningful.
+    static func freeBytes(important: Int64?, plain: Int64?) -> Int64 {
+        max(important ?? 0, plain ?? 0)
     }
 
     private static func notConnectedMessage(name: String) -> String {

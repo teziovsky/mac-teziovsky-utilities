@@ -100,6 +100,16 @@ final class ExternalDriveLocationsTests: XCTestCase {
         XCTAssertEqual(result, .notConnected("MEDIA isn't connected. Connect the drive and press Check Again (⌘R)."))
     }
 
+    /// External volumes (e.g. exFAT) report 0 for the "important usage" capacity while the
+    /// plain capacity is correct; a 0 must not hide real free space.
+    func testFreeBytesIgnoresZeroImportantUsageCapacity() {
+        XCTAssertEqual(ExternalDriveLocations.freeBytes(important: 0, plain: 319_238_176_768), 319_238_176_768)
+        XCTAssertEqual(ExternalDriveLocations.freeBytes(important: 500, plain: 300), 500)
+        XCTAssertEqual(ExternalDriveLocations.freeBytes(important: nil, plain: 300), 300)
+        XCTAssertEqual(ExternalDriveLocations.freeBytes(important: 200, plain: nil), 200)
+        XCTAssertEqual(ExternalDriveLocations.freeBytes(important: nil, plain: nil), 0)
+    }
+
     func testSuggestedPaths() {
         XCTAssertEqual(ExternalDriveFolderRole.destination.suggestedPath, "/Volumes/MEDIA")
         XCTAssertTrue(ExternalDriveFolderRole.source.suggestedPath.hasSuffix("/Pictures/_To_Homelab_Media"))

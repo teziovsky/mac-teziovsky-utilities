@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DroneModeView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var pendingDestructiveStep: DroneFinalizeStep?
 
     private var workflow: DroneWorkflowCoordinator { appState.droneWorkflow }
     private var finalizer: DroneFinalizer { workflow.finalizer }
@@ -44,20 +45,54 @@ struct DroneModeView: View {
                 }
                 .help("Back to the home screen (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+                .disabled(isBusy)
             }
 
             ToolbarItem(placement: .navigation) {
                 Button {
                     workflow.goBack()
                 } label: {
-                    Label("Go Back", systemImage: "arrow.uturn.backward")
+                    Label("Go Back", systemImage: "chevron.backward")
                 }
-                .help("Go back one step (⌘[ or Esc)")
+                .help("Go back one step (⌘[ or Esc). Never changes files.")
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(!workflow.canGoBack || isBusy)
             }
+
+            if workflow.canUndoFinalizeStep {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        workflow.undoLastFinalizeStep()
+                    } label: {
+                        Label("Undo Last Step", systemImage: "arrow.uturn.backward")
+                    }
+                    .help("Revert the last finalize step: restore trashed files and undo renames (⌘Z)")
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(isBusy)
+                }
+            }
         }
         .onEscape(perform: handleEscape)
+        .confirmationDialog(
+            pendingDestructiveStep.map { "\($0.actionTitle)?" } ?? "",
+            isPresented: Binding(
+                get: { pendingDestructiveStep != nil },
+                set: { if !$0 { pendingDestructiveStep = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDestructiveStep
+        ) { step in
+            Button(step.actionTitle, role: .destructive) {
+                pendingDestructiveStep = nil
+                workflow.performFinalizeStep()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDestructiveStep = nil
+            }
+            .keyboardShortcut(.defaultAction)
+        } message: { step in
+            Text(confirmationMessage(for: step))
+        }
         .onDisappear {
             if !isBusy {
                 workflow.reset()
@@ -189,7 +224,7 @@ struct DroneModeView: View {
                 config: config,
                 isRunning: finalizer.isRunning,
                 statusMessage: finalizer.statusMessage,
-                action: { workflow.performFinalizeStep() }
+                action: { pendingDestructiveStep = .cleanup }
             )
         case .flatten:
             DroneFlattenStepView(
@@ -197,7 +232,7 @@ struct DroneModeView: View {
                 config: config,
                 isRunning: finalizer.isRunning,
                 statusMessage: finalizer.statusMessage,
-                action: { workflow.performFinalizeStep() }
+                action: { pendingDestructiveStep = .flatten }
             )
         case .done:
             DroneDoneStepView(
@@ -219,13 +254,32 @@ struct DroneModeView: View {
         workflow.loadProject(projectDirectory: url, config: config)
     }
 
+    /// Esc only navigates. It never undoes a finalize step and never leaves a project that
+    /// already has changes; both need an explicit button.
     private func handleEscape() {
-        guard !isBusy else { return }
+        guard !isBusy, pendingDestructiveStep == nil else { return }
         if workflow.canGoBack {
             workflow.goBack()
-        } else {
+        } else if workflow.phase == .validateLayout {
             workflow.reset()
             appState.goHome()
+        }
+    }
+
+    private func confirmationMessage(for step: DroneFinalizeStep) -> String {
+        let plan = finalizer.plan
+        switch step {
+        case .cleanup:
+            let count = plan?.matchedPairs.count ?? 0
+            return "\(count) original\(count == 1 ? "" : "s") will be moved to the Trash and compressed files renamed. "
+                + "You can undo this step afterwards."
+        case .flatten:
+            let rawNote = finalizer.config.keepRawAfterFinalize
+                ? ""
+                : " The “\(finalizer.config.rawDirectoryName)/” folder with the raw footage will be moved to the Trash."
+            return "Finished media will be moved into the project folder.\(rawNote) You can undo this step afterwards."
+        case .merge, .done:
+            return ""
         }
     }
 }

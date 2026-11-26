@@ -67,10 +67,11 @@ struct LocalPhotosModeView: View {
             }
         }
         .onEscape {
+            // Esc cancels work in progress, but never silently discards finished scan results;
+            // leaving with results requires the explicit Home button.
             if service.isRunning {
                 service.cancel()
-            } else {
-                service.reset()
+            } else if service.directory == nil {
                 appState.goHome()
             }
         }

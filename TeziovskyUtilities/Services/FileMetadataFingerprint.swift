@@ -58,6 +58,11 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     }
 
     private static func xattrDigests(of url: URL) throws -> [String: Data] {
+        try xattrValues(of: url).mapValues { Data(SHA256.hash(data: $0)) }
+    }
+
+    /// Every extended attribute of `url` (not following symlinks), with its exact bytes.
+    static func xattrValues(of url: URL) throws -> [String: Data] {
         let path = url.path
         // The list can change between the size query and the read; retry on ERANGE.
         for _ in 0..<5 {
@@ -73,11 +78,11 @@ struct FileMetadataFingerprint: Equatable, Sendable {
             let names = buffer[0..<read].split(separator: 0).map { name in
                 String(cString: Array(name) + [0])
             }
-            var digests: [String: Data] = [:]
+            var values: [String: Data] = [:]
             for name in names {
-                digests[name] = Data(SHA256.hash(data: try xattrValue(named: name, at: path)))
+                values[name] = try xattrValue(named: name, at: path)
             }
-            return digests
+            return values
         }
         throw POSIXError(.EAGAIN)
     }

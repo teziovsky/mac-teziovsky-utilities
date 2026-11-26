@@ -109,6 +109,8 @@ private struct HomeModeCard: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.tint)
                 .symbolRenderingMode(.hierarchical)
+                // Symbols differ in height; a fixed frame keeps every card's title on one line.
+                .frame(height: 48, alignment: .bottomLeading)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)

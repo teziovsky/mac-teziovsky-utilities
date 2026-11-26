@@ -231,13 +231,16 @@ final class PhotosService: NSObject, ObservableObject {
         let assets = PHAsset.fetchAssets(in: album, options: nil)
         let mediaCount = assets.count
         guard mediaCount > 0 else { return nil }
+        let videoOptions = PHFetchOptions()
+        videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+        let videoCount = PHAsset.fetchAssets(in: album, options: videoOptions).count
 
         return PhotoAlbum(
             id: album.localIdentifier,
             name: name,
             mediaCount: mediaCount,
-            photoCount: mediaCount,
-            videoCount: 0,
+            photoCount: mediaCount - videoCount,
+            videoCount: videoCount,
             collectionIdentifier: album.localIdentifier
         )
     }
@@ -335,7 +338,8 @@ final class PhotosService: NSObject, ObservableObject {
                     id: asset.localIdentifier,
                     filename: Self.filename(for: asset),
                     isVideo: asset.mediaType == .video,
-                    creationDate: asset.creationDate
+                    creationDate: asset.creationDate,
+                    duration: asset.mediaType == .video ? asset.duration : nil
                 )
             )
             assetsByID[asset.localIdentifier] = asset

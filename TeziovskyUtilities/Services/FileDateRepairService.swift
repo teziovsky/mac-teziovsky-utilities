@@ -311,6 +311,27 @@ enum LocalMediaOrganizer {
     }
 }
 
+/// The three reviewable steps of the Local Photos workflow; exclusions are kept per step.
+enum LocalMediaStep: Hashable, Sendable {
+    case conversion
+    case repair
+    case organization
+}
+
+/// Path search for the review lists: case-insensitive and folding letters like "Ł" or "ż"
+/// to ASCII, which `.diacriticInsensitive` alone does not do.
+enum LocalMediaListFilter {
+    static func matches(_ path: String, query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        return fold(path).contains(fold(trimmed))
+    }
+
+    private static func fold(_ text: String) -> String {
+        (text.applyingTransform(StringTransform("Latin-ASCII"), reverse: false) ?? text).lowercased()
+    }
+}
+
 @MainActor
 final class LocalPhotosService: ObservableObject {
     @Published private(set) var directory: URL?
@@ -339,16 +360,49 @@ final class LocalPhotosService: ObservableObject {
 
     var isRunning: Bool { isScanning || isConverting || isRepairing || isOrganizing }
 
+    /// False after a cancelled or failed scan, so empty lists are not shown as "nothing to do".
+    @Published private(set) var lastScanCompleted = false
+    /// Files the user unticked, per step, keyed by relative path so the choice survives the
+    /// automatic rescan after converting or organizing.
+    @Published private(set) var excludedPaths: [LocalMediaStep: Set<String>] = [:]
+
+    func setExcluded(_ excluded: Bool, path: String, in step: LocalMediaStep) {
+        if excluded {
+            excludedPaths[step, default: []].insert(path)
+        } else {
+            excludedPaths[step]?.remove(path)
+        }
+    }
+
+    func isExcluded(path: String, in step: LocalMediaStep) -> Bool {
+        excludedPaths[step]?.contains(path) ?? false
+    }
+
+    var includedConversionItems: [LocalMediaConversionItem] {
+        conversionItems.filter { !isExcluded(path: $0.sourceRelativePath, in: .conversion) }
+    }
+
+    var includedOrganizationItems: [LocalMediaOrganizationItem] {
+        organizationItems.filter { !isExcluded(path: $0.sourceRelativePath, in: .organization) }
+    }
+
     var pendingItems: [FileDateRepairItem] {
-        items.filter { !attemptedIDs.contains($0.id) }
+        items.filter { !attemptedIDs.contains($0.id) && !isExcluded(path: $0.relativePath, in: .repair) }
     }
 
     var currentChunk: [FileDateRepairItem] {
-        FileDateRepairChunker.next(from: items, attemptedIDs: attemptedIDs, size: chunkSize)
+        FileDateRepairChunker.next(
+            from: items.filter { !isExcluded(path: $0.relativePath, in: .repair) },
+            attemptedIDs: attemptedIDs,
+            size: chunkSize
+        )
     }
 
     func scan(directory: URL) {
         cancel()
+        if directory.standardizedFileURL != self.directory?.standardizedFileURL {
+            excludedPaths = [:]
+        }
         resetResults()
         self.directory = directory
         isScanning = true
@@ -390,6 +444,7 @@ final class LocalPhotosService: ObservableObject {
                 organizationSkippedCount = result.organizationSkippedCount
                 failures = result.failures
                 scannedFileCount = result.scannedFileCount
+                lastScanCompleted = true
             } catch is CancellationError {
                 return
             } catch {
@@ -458,8 +513,8 @@ final class LocalPhotosService: ObservableObject {
     }
 
     func organizeAll() {
-        guard !isRunning, !organizationItems.isEmpty, let directory else { return }
-        let plannedItems = organizationItems
+        let plannedItems = includedOrganizationItems
+        guard !isRunning, !plannedItems.isEmpty, let directory else { return }
         let skippedCount = organizationSkippedCount
         isOrganizing = true
         cancellationMessage = nil
@@ -588,6 +643,7 @@ final class LocalPhotosService: ObservableObject {
     }
 
     private func resetResults() {
+        lastScanCompleted = false
         conversionItems = []
         items = []
         organizationItems = []
@@ -610,8 +666,8 @@ final class LocalPhotosService: ObservableObject {
 
 extension LocalPhotosService {
     func convertAll() {
-        guard !isRunning, !conversionItems.isEmpty, let directory else { return }
-        let plannedItems = conversionItems
+        let plannedItems = includedConversionItems
+        guard !isRunning, !plannedItems.isEmpty, let directory else { return }
         isConverting = true
         cancellationMessage = nil
         conversionSummary = LocalMediaConversionSummary(total: plannedItems.count)

@@ -22,7 +22,7 @@ struct PermissionsOnboardingView: View {
                 Text(
                     """
                     To organize your iCloud Photos albums, \(AppBranding.appName) needs access to your \
-                    Photos library. It uses this to list albums, show thumbnails, export originals to a folder, \
+                    Photos library. It uses this to list albums, show thumbnails, export them to a folder, \
                     and move items between albums.
                     """
                 )
@@ -31,7 +31,10 @@ struct PermissionsOnboardingView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Organizing drone footage works on regular files and needs no Photos access — you can continue without it.")
+                Text(
+                    "Drone footage and local photo folders work on regular files and need no Photos access — "
+                        + "you can continue without it."
+                )
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

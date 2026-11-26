@@ -215,29 +215,77 @@ enum DroneFinalizePlanBuilder {
     }
 }
 
+/// Where an external tool will be taken from, for the Settings status line.
+enum DroneToolStatus: Equatable {
+    case configured(URL)
+    case autoDetected(URL, configuredPathIsInvalid: Bool)
+    case notFound(configuredPathIsInvalid: Bool)
+}
+
 enum DroneToolPaths {
-    static func resolveHandBrakeCLI(configuredPath: String) -> URL? {
-        let trimmed = configuredPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty, FileManager.default.isExecutableFile(atPath: trimmed) {
-            return URL(fileURLWithPath: trimmed)
+    /// HandBrake.app does not bundle the CLI; it comes from Homebrew or the separate download.
+    static let handBrakeCandidates = [
+        "/opt/homebrew/bin/HandBrakeCLI",
+        "/usr/local/bin/HandBrakeCLI"
+    ]
+
+    static let resolveCandidates = [
+        "/Applications/DaVinci Resolve/DaVinci Resolve.app",
+        "/Applications/DaVinci Resolve.app"
+    ]
+
+    static func handBrakeStatus(
+        configuredPath: String,
+        candidates: [String] = handBrakeCandidates
+    ) -> DroneToolStatus {
+        status(configuredPath: configuredPath, candidates: candidates) {
+            FileManager.default.isExecutableFile(atPath: $0)
         }
-        // HandBrake.app does not bundle the CLI; it comes from Homebrew or the separate download.
-        let candidates = [
-            "/opt/homebrew/bin/HandBrakeCLI",
-            "/usr/local/bin/HandBrakeCLI"
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }.map { URL(fileURLWithPath: $0) }
+    }
+
+    static func resolveStatus(
+        configuredPath: String,
+        candidates: [String] = resolveCandidates
+    ) -> DroneToolStatus {
+        status(configuredPath: configuredPath, candidates: candidates) {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    }
+
+    static func resolveHandBrakeCLI(configuredPath: String) -> URL? {
+        handBrakeStatus(configuredPath: configuredPath).url
     }
 
     static func resolveDaVinciResolve(configuredPath: String) -> URL? {
+        resolveStatus(configuredPath: configuredPath).url
+    }
+
+    /// A configured path wins when usable; otherwise auto-detection is used, but a broken
+    /// configured path is still reported instead of being ignored silently.
+    private static func status(
+        configuredPath: String,
+        candidates: [String],
+        isUsable: (String) -> Bool
+    ) -> DroneToolStatus {
         let trimmed = configuredPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty, FileManager.default.fileExists(atPath: trimmed) {
-            return URL(fileURLWithPath: trimmed)
+        if !trimmed.isEmpty, isUsable(trimmed) {
+            return .configured(URL(fileURLWithPath: trimmed))
         }
-        let candidates = [
-            "/Applications/DaVinci Resolve/DaVinci Resolve.app",
-            "/Applications/DaVinci Resolve.app"
-        ]
-        return candidates.first { FileManager.default.fileExists(atPath: $0) }.map { URL(fileURLWithPath: $0) }
+        let configuredPathIsInvalid = !trimmed.isEmpty
+        if let found = candidates.first(where: isUsable) {
+            return .autoDetected(URL(fileURLWithPath: found), configuredPathIsInvalid: configuredPathIsInvalid)
+        }
+        return .notFound(configuredPathIsInvalid: configuredPathIsInvalid)
+    }
+}
+
+extension DroneToolStatus {
+    var url: URL? {
+        switch self {
+        case .configured(let url), .autoDetected(let url, _):
+            return url
+        case .notFound:
+            return nil
+        }
     }
 }

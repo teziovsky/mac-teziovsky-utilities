@@ -20,6 +20,7 @@ private enum LocalPhotosWorkflowStep: Int, CaseIterable {
 struct LocalPhotosModeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var step: LocalPhotosWorkflowStep = .convert
+    @State private var filter = ""
 
     @ObservedObject var service: LocalPhotosService
 
@@ -32,16 +33,24 @@ struct LocalPhotosModeView: View {
                     progressCard
                 }
                 if service.directory != nil, !service.isScanning {
-                    workflowSteps
-                    switch step {
-                    case .convert:
-                        conversionCard
-                    case .repair:
-                        resultsCard
-                    case .organize:
-                        organizationCard
-                    case .complete:
-                        completionCard
+                    if service.lastScanCompleted {
+                        workflowSteps
+                        switch step {
+                        case .convert:
+                            conversionCard
+                        case .repair:
+                            resultsCard
+                        case .organize:
+                            organizationCard
+                        case .complete:
+                            completionCard
+                        }
+                    } else {
+                        LocalMediaIncompleteScanCard(
+                            message: service.cancellationMessage
+                                ?? "The folder could not be scanned completely. Check the issues below and rescan.",
+                            rescan: rescan
+                        )
                     }
                 }
                 if !service.failures.isEmpty {
@@ -53,6 +62,7 @@ struct LocalPhotosModeView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(AppBranding.localPhotosModeTitle)
+        .searchable(text: $filter, placement: .toolbar, prompt: "Filter files")
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -212,10 +222,15 @@ struct LocalPhotosModeView: View {
                 if !service.items.isEmpty {
                     Divider()
                     chunkControls
-                    LazyVStack(spacing: 8) {
-                        ForEach(service.items) { item in
-                            let didFail = service.attemptedIDs.contains(item.id)
-                                && !service.repairedIDs.contains(item.id)
+                    LocalMediaFilteredList(items: service.items, path: \.relativePath, filter: filter) { item in
+                        let didFail = service.attemptedIDs.contains(item.id)
+                            && !service.repairedIDs.contains(item.id)
+                        LocalMediaSelectableRow(
+                            service: service,
+                            path: item.relativePath,
+                            fileURL: item.fileURL,
+                            step: .repair
+                        ) {
                             FileDateRepairRow(
                                 item: item,
                                 isRepaired: service.repairedIDs.contains(item.id),
@@ -250,6 +265,7 @@ struct LocalPhotosModeView: View {
     private var conversionCard: some View {
         LocalMediaConversionPreviewCard(
             service: service,
+            filter: filter,
             continueWithoutConversion: { step = .repair }
         )
     }
@@ -328,6 +344,7 @@ struct LocalPhotosModeView: View {
     private var organizationCard: some View {
         LocalMediaOrganizationPreviewCard(
             service: service,
+            filter: filter,
             goBack: { step = .repair },
             finish: { step = .complete }
         )
@@ -398,6 +415,7 @@ struct LocalPhotosModeView: View {
 
 private struct LocalMediaConversionPreviewCard: View {
     @ObservedObject var service: LocalPhotosService
+    let filter: String
     let continueWithoutConversion: () -> Void
 
     var body: some View {
@@ -420,8 +438,17 @@ private struct LocalMediaConversionPreviewCard: View {
                     conversionCompleteLabel
                 } else {
                     Divider()
-                    LazyVStack(spacing: 8) {
-                        ForEach(service.conversionItems) { item in
+                    LocalMediaFilteredList(
+                        items: service.conversionItems,
+                        path: \.sourceRelativePath,
+                        filter: filter
+                    ) { item in
+                        LocalMediaSelectableRow(
+                            service: service,
+                            path: item.sourceRelativePath,
+                            fileURL: item.sourceURL,
+                            step: .conversion
+                        ) {
                             LocalMediaConversionRow(item: item)
                         }
                     }
@@ -439,11 +466,11 @@ private struct LocalMediaConversionPreviewCard: View {
                         Button("Continue to Date Preview", action: continueWithoutConversion)
                             .pillActionButton(prominent: true)
                     } else {
-                        Button("Convert \(service.conversionItems.count) Files") {
+                        Button("Convert \(service.includedConversionItems.count) Files") {
                             service.convertAll()
                         }
                         .pillActionButton(prominent: true)
-                        .disabled(service.isRunning)
+                        .disabled(service.isRunning || service.includedConversionItems.isEmpty)
                     }
                 }
             }
@@ -521,6 +548,7 @@ private struct LocalMediaConversionRow: View {
 
 private struct LocalMediaOrganizationPreviewCard: View {
     @ObservedObject var service: LocalPhotosService
+    let filter: String
     let goBack: () -> Void
     let finish: () -> Void
 
@@ -547,8 +575,17 @@ private struct LocalMediaOrganizationPreviewCard: View {
                         .foregroundStyle(.green)
                 } else {
                     Divider()
-                    LazyVStack(spacing: 8) {
-                        ForEach(service.organizationItems) { item in
+                    LocalMediaFilteredList(
+                        items: service.organizationItems,
+                        path: \.sourceRelativePath,
+                        filter: filter
+                    ) { item in
+                        LocalMediaSelectableRow(
+                            service: service,
+                            path: item.sourceRelativePath,
+                            fileURL: item.sourceURL,
+                            step: .organization
+                        ) {
                             LocalMediaOrganizationRow(item: item)
                         }
                     }
@@ -572,11 +609,11 @@ private struct LocalMediaOrganizationPreviewCard: View {
             Button("Finish", action: finish)
                 .pillActionButton(prominent: true)
         } else {
-            Button("Organize \(service.organizationItems.count) Files") {
+            Button("Organize \(service.includedOrganizationItems.count) Files") {
                 service.organizeAll()
             }
             .pillActionButton(prominent: true)
-            .disabled(service.isRunning)
+            .disabled(service.isRunning || service.includedOrganizationItems.isEmpty)
             .help("Move every file exactly as shown in this preview")
         }
     }

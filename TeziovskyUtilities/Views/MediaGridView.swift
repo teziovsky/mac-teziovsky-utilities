@@ -11,7 +11,7 @@ struct MediaGridView: View {
 
     var body: some View {
         gridContent
-            .padding(.leading, gridEdgeInset)
+            .padding(.horizontal, gridEdgeInset)
             .padding(.top, gridEdgeInset)
             .onChange(of: appState.selectedAlbum?.id) { _, _ in
                 isGridFocused = false
@@ -52,6 +52,10 @@ struct MediaGridView: View {
                             onSelect: { itemID in
                                 appState.selectedMediaID = itemID
                                 isGridFocused = true
+                            },
+                            onOpen: { itemID in
+                                appState.selectedMediaID = itemID
+                                Task { await appState.previewSelectedMedia() }
                             }
                         )
                         .animation(.smooth(duration: 0.35), value: appState.thumbnailDisplayMode)
@@ -79,6 +83,15 @@ struct MediaGridView: View {
                         appState.photosEscapeBack()
                         return .handled
                     }
+                    .onKeyPress(.space) {
+                        // Space toggles Quick Look, as in Finder and Photos.
+                        if QuickLookHelper.isPanelVisible {
+                            QuickLookHelper.closePreview()
+                        } else {
+                            Task { await appState.previewSelectedMedia() }
+                        }
+                        return .handled
+                    }
                     .onChange(of: appState.selectedMediaID) { _, newID in
                         guard let newID else { return }
                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -104,6 +117,12 @@ private struct MediaThumbnailCell: View {
     @State private var image: NSImage?
     @State private var loadFailed = false
     @State private var loadGeneration = 0
+    @Environment(\.displayScale) private var displayScale
+
+    /// Pixel size requested from PhotoKit: sharp at the current cell size on this display.
+    private var pixelSize: Int {
+        ThumbnailLoader.pixelBucket(forPoints: cellSize, scale: displayScale)
+    }
 
     var body: some View {
         ZStack {
@@ -129,21 +148,52 @@ private struct MediaThumbnailCell: View {
             }
         }
         .modifier(AnimatableCellSize(size: cellSize))
+        .overlay(alignment: .bottomTrailing) {
+            if item.isVideo {
+                videoBadge
+            }
+        }
         .overlay {
             Rectangle()
                 .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
         }
         .contentShape(Rectangle())
+        .help(tooltip)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .task(id: item.id) {
+        .task(id: "\(item.id)@\(pixelSize)") {
+            // A bigger bucket keeps showing the current image until the sharper one arrives.
             await loadThumbnail()
         }
     }
 
     private var accessibilityLabel: String {
         let kind = item.isVideo ? "Video" : "Photo"
-        return "\(kind), \(item.filename)"
+        let duration = item.durationText.map { ", \($0)" } ?? ""
+        return "\(kind), \(item.filename)\(duration)"
+    }
+
+    private var tooltip: String {
+        guard let date = item.creationDate else { return item.filename }
+        return "\(item.filename) · \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    /// Shown on placeholders too, so videos are recognisable before thumbnails load.
+    private var videoBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "play.fill")
+                .font(.system(size: 8, weight: .bold))
+            if let duration = item.durationText {
+                Text(duration)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(.black.opacity(0.55), in: Capsule())
+        .padding(5)
+        .allowsHitTesting(false)
     }
 
     private func retryLoad() {
@@ -159,15 +209,18 @@ private struct MediaThumbnailCell: View {
     private func loadThumbnail(generation: Int? = nil) async {
         let activeGeneration = generation ?? loadGeneration
         loadFailed = false
-        if let cached = await ThumbnailLoader.shared.cachedImage(for: item.id) {
+        let size = pixelSize
+        if let cached = await ThumbnailLoader.shared.cachedImage(for: item.id, pixelSize: size) {
             guard activeGeneration == loadGeneration else { return }
             image = cached
             return
         }
-        let loaded = await ThumbnailLoader.shared.thumbnail(for: item, album: album, asset: asset)
+        let loaded = await ThumbnailLoader.shared.thumbnail(for: item, album: album, asset: asset, pixelSize: size)
         guard activeGeneration == loadGeneration else { return }
-        image = loaded
-        loadFailed = loaded == nil
+        if let loaded {
+            image = loaded
+        }
+        loadFailed = loaded == nil && image == nil
     }
 
     private var cellBackground: Color {
@@ -187,20 +240,6 @@ private struct MediaThumbnailCell: View {
             .aspectRatio(contentMode: displayMode == .square ? .fill : .fit)
             .modifier(AnimatableThumbnailFrame(width: dimensions.width, height: dimensions.height))
             .clipShape(Rectangle())
-            .overlay(alignment: .bottomTrailing) {
-                if item.isVideo {
-                    videoPlayIndicator
-                        .transition(.opacity)
-                }
-            }
-    }
-
-    private var videoPlayIndicator: some View {
-        Image(systemName: "play.circle.fill")
-            .font(.title2)
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .black.opacity(0.35))
-            .padding(6)
     }
 
     private func displayedImageDimensions(for image: NSImage) -> CGSize {
@@ -233,6 +272,7 @@ private struct SmoothMediaGrid: View, Animatable {
     let displayMode: ThumbnailDisplayMode
     let assetForItem: (MediaItem) -> PHAsset?
     let onSelect: (String) -> Void
+    let onOpen: (String) -> Void
 
     var animatableData: CGFloat {
         get { columnCount }
@@ -278,6 +318,8 @@ private struct SmoothMediaGrid: View, Animatable {
                             )
                         }
                         .buttonStyle(.plain)
+                        // Simultaneous, so the first click still selects immediately.
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen(item.id) })
                         .id(item.id)
                     }
 

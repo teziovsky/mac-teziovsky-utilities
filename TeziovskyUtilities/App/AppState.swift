@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var albumLoadGeneration = 0
     private var currentAlbumAssets: [String: PHAsset] = [:]
+    private var sidebarSelectionTask: Task<Void, Never>?
 
     @Published var route: AppRoute = .home
     @Published var hasDismissedPermissionsOnboarding = false
@@ -140,14 +141,6 @@ final class AppState: ObservableObject {
             mediaItems = []
             currentAlbumAssets = [:]
             selectedMediaID = nil
-        }
-    }
-
-    func toggleAlbumSelection(_ album: PhotoAlbum) async {
-        if selectedAlbum?.id == album.id {
-            await selectAlbum(nil)
-        } else {
-            await selectAlbum(album)
         }
     }
 
@@ -379,5 +372,41 @@ extension AppState {
 
     func enterLocalPhotosMode() {
         route = .localPhotos
+    }
+}
+
+extension AppState {
+    var photosCommands: PhotosCommandState {
+        PhotosCommandState(
+            route: route,
+            hasSelectedAlbum: selectedAlbum != nil,
+            hasSelectedMedia: selectedMediaID != nil,
+            hasMedia: !mediaItems.isEmpty,
+            canOrganizeSelectedAlbum: canOrganizeSelectedAlbum,
+            isOrganizing: organizeExporter.isRunning,
+            isLoadingAlbums: photosService.isLoadingAlbums
+        )
+    }
+
+    /// Sidebar selection (click or arrow keys): the highlight moves at once, the album loads
+    /// once the selection settles, so arrowing through large albums does not load each one.
+    func selectAlbumFromSidebar(_ album: PhotoAlbum?) {
+        sidebarSelectionTask?.cancel()
+        guard let album else {
+            sidebarSelectionTask = Task { await selectAlbum(nil) }
+            return
+        }
+        albumLoadGeneration += 1
+        selectedAlbum = album
+        selectedMediaID = nil
+        mediaItems = []
+        currentAlbumAssets = [:]
+        mediaError = nil
+        isLoadingMedia = true
+        sidebarSelectionTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.selectAlbum(album)
+        }
     }
 }

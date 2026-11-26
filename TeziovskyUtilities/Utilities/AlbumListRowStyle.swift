@@ -19,54 +19,9 @@ enum AlbumListRowStyle {
         Color(nsColor: .quaternarySystemFill)
     }
 
-    // MARK: - Sidebar rows (icon + label + count)
+    // MARK: - Sidebar
 
     static let sidebarIconName = "rectangle.stack"
-    static let sidebarIconWidth: CGFloat = 20
-    static let sidebarIconSpacing: CGFloat = 12
-    static let sidebarCornerRadius: CGFloat = 8
-    static let sidebarHorizontalPadding: CGFloat = 12
-    static let sidebarVerticalPadding: CGFloat = 8
-    static let sidebarListInset: CGFloat = 8
-    static let sidebarRowSpacing: CGFloat = 2
-
-    static let sidebarNameFont: Font = .system(size: 15)
-    static let sidebarCountFont: Font = .system(size: 13)
-
-    static var sidebarSelectionFill: Color {
-        Color.primary.opacity(0.14)
-    }
-
-    static var sidebarHoverFill: Color {
-        Color.primary.opacity(0.07)
-    }
-}
-
-/// Sidebar: album icon, name, trailing media count (macOS sidebar style).
-struct AlbumSidebarRowContent: View {
-    let album: PhotoAlbum
-
-    var body: some View {
-        HStack(alignment: .center, spacing: AlbumListRowStyle.sidebarIconSpacing) {
-            Image(systemName: AlbumListRowStyle.sidebarIconName)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: AlbumListRowStyle.sidebarIconWidth, alignment: .center)
-
-            Text(album.name)
-                .font(AlbumListRowStyle.sidebarNameFont)
-                .lineLimit(1)
-                .foregroundStyle(.primary)
-
-            Spacer(minLength: 8)
-
-            Text("\(album.mediaCount)")
-                .font(AlbumListRowStyle.sidebarCountFont)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 
 /// Settings: album name and media summary (no icon).
@@ -88,17 +43,6 @@ struct AlbumListRowLabels: View {
 }
 
 extension View {
-    func albumSidebarRowChrome(backgroundFill: Color) -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, AlbumListRowStyle.sidebarHorizontalPadding)
-            .padding(.vertical, AlbumListRowStyle.sidebarVerticalPadding)
-            .background {
-                RoundedRectangle(cornerRadius: AlbumListRowStyle.sidebarCornerRadius)
-                    .fill(backgroundFill)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: AlbumListRowStyle.sidebarCornerRadius))
-    }
-
     /// Pads the row and defines hit testing to match the hover/selection background (Settings).
     func albumListRowChrome(backgroundFill: Color) -> some View {
         frame(maxWidth: .infinity, alignment: .leading)
@@ -154,34 +98,7 @@ extension View {
     }
 }
 
-/// Draws an accent focus ring only when the element is focused via the keyboard.
-///
-/// Mouse clicks on plain SwiftUI buttons don't move keyboard focus on macOS, so the ring
-/// stays hidden for pointer interaction and appears only for Tab / Full Keyboard Access.
-private struct KeyboardFocusRing: ViewModifier {
-    var cornerRadius: CGFloat
-    @FocusState private var isFocused: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .focused($isFocused)
-            .focusEffectDisabled()
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.accentColor, lineWidth: isFocused ? 3 : 0)
-                    .shadow(color: isFocused ? Color.accentColor.opacity(0.45) : .clear, radius: 5)
-                    .allowsHitTesting(false)
-            }
-            .animation(.smooth(duration: 0.15), value: isFocused)
-    }
-}
-
 extension View {
-    /// Adds a keyboard-only accent focus ring (hidden for mouse interaction).
-    func keyboardFocusRing(cornerRadius: CGFloat = 8) -> some View {
-        modifier(KeyboardFocusRing(cornerRadius: cornerRadius))
-    }
-
     /// Runs `action` when Escape is pressed anywhere in the view's window.
     ///
     /// Uses a hidden `.cancelAction` button (registered as a window key-equivalent) which is

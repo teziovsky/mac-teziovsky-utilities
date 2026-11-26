@@ -10,6 +10,10 @@ final class OrganizeExporter: ObservableObject {
     @Published private(set) var failures: [OrganizeFailure] = []
     @Published private(set) var isRunning = false
     @Published private(set) var destinationAlbumTitle: String?
+    /// Kept after the run: the source album often disappears from the list once emptied.
+    @Published private(set) var sourceAlbumName: String?
+    @Published private(set) var exportDirectory: URL?
+    @Published private(set) var startedAt: Date?
 
     private var exportTask: Task<Void, Never>?
     private var onFinished: (@MainActor () async -> Void)?
@@ -27,6 +31,9 @@ final class OrganizeExporter: ObservableObject {
     ) {
         cancel()
         failures = []
+        sourceAlbumName = sourceAlbum.name
+        self.exportDirectory = exportDirectory
+        startedAt = Date()
         progress = OrganizeProgress(
             current: 0,
             total: items.count,

@@ -1,11 +1,26 @@
+import AppKit
 import SwiftUI
 
 struct OrganizeProgressView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
+    private var exporter: OrganizeExporter { appState.organizeExporter }
+
     private var failures: [OrganizeFailure] {
-        appState.organizeExporter.failures
+        exporter.failures
+    }
+
+    private func etaText(for progress: OrganizeProgress) -> String? {
+        guard !progress.isComplete, let startedAt = exporter.startedAt,
+              let remaining = OrganizeETA.remaining(
+                  processed: progress.current,
+                  total: progress.total,
+                  elapsed: Date().timeIntervalSince(startedAt)
+              ) else {
+            return nil
+        }
+        return OrganizeETA.text(forRemaining: remaining)
     }
 
     var body: some View {
@@ -14,21 +29,35 @@ struct OrganizeProgressView: View {
                 .font(.title2)
                 .bold()
 
-            if let album = appState.selectedAlbum {
+            if let albumName = exporter.sourceAlbumName {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(album.name)
+                    Text(albumName)
                         .font(AlbumListRowStyle.nameFont)
-                    if let destination = appState.organizeExporter.destinationAlbumTitle {
+                    if let destination = exporter.destinationAlbumTitle {
                         Text("Moving to “\(destination)”")
                             .font(AlbumListRowStyle.detailFont)
                             .foregroundStyle(.secondary)
                     }
+                    if let folder = exporter.exportDirectory {
+                        Label(DroneFormat.abbreviatedPath(folder.path), systemImage: "folder")
+                            .font(AlbumListRowStyle.detailFont.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
             }
 
-            if let progress = appState.organizeExporter.progress {
+            if let progress = exporter.progress {
                 ProgressView(value: progress.fraction) {
-                    Text("\(progress.current) / \(progress.total)")
+                    HStack {
+                        Text("\(progress.current) / \(progress.total)")
+                        Spacer()
+                        if let eta = etaText(for: progress) {
+                            Text(eta)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } currentValueLabel: {
                     Text(progress.filename)
                         .lineLimit(1)
@@ -64,11 +93,16 @@ struct OrganizeProgressView: View {
 
             HStack {
                 Spacer()
-                if appState.organizeExporter.isRunning {
+                if exporter.isRunning {
                     Button("Cancel") {
-                        appState.organizeExporter.cancel()
+                        exporter.cancel()
                     }
                 } else {
+                    if let folder = exporter.exportDirectory, exporter.progress?.movedCount ?? 0 > 0 {
+                        Button("Reveal in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([folder])
+                        }
+                    }
                     Button("Done") {
                         dismiss()
                     }

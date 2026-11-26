@@ -921,8 +921,8 @@ struct DroneDoneStepView: View {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: projectPath)])
                         }
                         .pillActionButton()
-                        .help("Reveal the project folder in Finder (⌘R)")
-                        .keyboardShortcut("r", modifiers: .command)
+                        .help("Reveal the project folder in Finder (⇧⌘R)")
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
                     }
                     Spacer()
                     Button("Choose Another Folder", action: onChooseAnother)

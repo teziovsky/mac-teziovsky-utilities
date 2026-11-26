@@ -21,6 +21,8 @@ struct TeziovskyUtilitiesApp: App {
                 Button("Toggle Sidebar") {
                     appState.toggleSidebarVisibility()
                 }
+                .keyboardShortcut("s", modifiers: [.control, .command])
+                .disabled(appState.route != .photos)
             }
             TeziovskyUtilitiesAlbumCommands(appState: appState)
             CommandGroup(after: .sidebar) {
@@ -28,13 +30,13 @@ struct TeziovskyUtilitiesApp: App {
                     Task { await appState.photosService.reloadAlbums() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(appState.photosService.isLoadingAlbums)
+                .disabled(!appState.photosCommands.canRefreshAlbums)
 
                 Button("Toggle Thumbnail Display") {
                     appState.toggleThumbnailDisplayMode()
                 }
                 .keyboardShortcut("t", modifiers: .command)
-                .disabled(appState.selectedAlbum == nil)
+                .disabled(!appState.photosCommands.canToggleThumbnails)
 
                 Divider()
 
@@ -42,19 +44,14 @@ struct TeziovskyUtilitiesApp: App {
                     appState.promptExportDirectoryAndOrganize()
                 }
                 .keyboardShortcut("e", modifiers: .command)
-                .disabled(
-                    appState.selectedAlbum == nil
-                        || appState.mediaItems.isEmpty
-                        || appState.organizeExporter.isRunning
-                        || !appState.canOrganizeSelectedAlbum
-                )
+                .disabled(!appState.photosCommands.canOrganize)
 
                 Divider()
 
                 Button("Quick Look") {
                     Task { await appState.previewSelectedMedia() }
                 }
-                .disabled(appState.selectedMediaID == nil)
+                .disabled(!appState.photosCommands.canQuickLook)
             }
         }
 
@@ -75,7 +72,7 @@ private struct TeziovskyUtilitiesAlbumCommands: Commands {
                     Task { await appState.selectAlbum(at: index) }
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
-                .disabled(!appState.selectableAlbums.indices.contains(index))
+                .disabled(!appState.photosCommands.canSwitchAlbums)
             }
 
             Divider()
@@ -83,12 +80,12 @@ private struct TeziovskyUtilitiesAlbumCommands: Commands {
             Button("Next Album") {
                 Task { await appState.selectNextAlbum() }
             }
-            .disabled(!appState.canSelectNextAlbum)
+            .disabled(!appState.photosCommands.canSwitchAlbums || !appState.canSelectNextAlbum)
 
             Button("Previous Album") {
                 Task { await appState.selectPreviousAlbum() }
             }
-            .disabled(!appState.canSelectPreviousAlbum)
+            .disabled(!appState.photosCommands.canSwitchAlbums || !appState.canSelectPreviousAlbum)
         }
     }
 }

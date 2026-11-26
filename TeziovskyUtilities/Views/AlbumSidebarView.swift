@@ -45,64 +45,35 @@ struct AlbumSidebarView: View {
             OrganizeCompleteEmptyView(title: message.title, description: message.description)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: AlbumListRowStyle.sidebarRowSpacing) {
-                    ForEach(appState.selectableAlbums) { album in
-                        AlbumSidebarListRow(
-                            album: album,
-                            isSelected: appState.selectedAlbum?.id == album.id
-                        ) {
-                            Task { await appState.toggleAlbumSelection(album) }
-                        }
-                    }
+            List(selection: selection) {
+                ForEach(appState.selectableAlbums) { album in
+                    Label(album.name, systemImage: AlbumListRowStyle.sidebarIconName)
+                        .badge(album.mediaCount)
+                        .help(album.mediaSummary)
+                        .tag(album.id)
+                        .accessibilityHint(album.mediaSummary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, AlbumListRowStyle.sidebarListInset)
-                .padding(.vertical, AlbumListRowStyle.sidebarListInset)
             }
-            .frame(maxHeight: .infinity)
+            .listStyle(.sidebar)
             .overlay {
                 if appState.photosService.isLoadingAlbums {
-                    ZStack {
-                        Color.clear
-                        ProgressView()
-                            .controlSize(.regular)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .allowsHitTesting(false)
+                    ProgressView()
+                        .controlSize(.regular)
+                        .allowsHitTesting(false)
                 }
             }
         }
     }
 
-}
-
-private struct AlbumSidebarListRow: View {
-    let album: PhotoAlbum
-    let isSelected: Bool
-    let onSelect: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: onSelect) {
-            AlbumSidebarRowContent(album: album)
-                .albumSidebarRowChrome(backgroundFill: rowBackgroundFill)
-        }
-        .buttonStyle(.plain)
-        .keyboardFocusRing(cornerRadius: AlbumListRowStyle.sidebarCornerRadius)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(album.name)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityHint("\(album.mediaCount) items")
-    }
-
-    private var rowBackgroundFill: Color {
-        if isSelected {
-            return AlbumListRowStyle.sidebarSelectionFill
-        }
-        if isHovered {
-            return AlbumListRowStyle.sidebarHoverFill
-        }
-        return .clear
+    /// Native list selection: click, arrow keys and type-to-select. Deselecting is done with
+    /// Esc or the Back button, as clicking a selected row keeps it selected.
+    private var selection: Binding<String?> {
+        Binding(
+            get: { appState.selectedAlbum?.id },
+            set: { id in
+                guard id != appState.selectedAlbum?.id else { return }
+                appState.selectAlbumFromSidebar(appState.selectableAlbums.first { $0.id == id })
+            }
+        )
     }
 }

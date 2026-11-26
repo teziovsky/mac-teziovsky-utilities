@@ -18,7 +18,7 @@ enum AppBranding {
             ?? fallbackAppName
 
     static let photosModeTitle = "Export iCloud Photos"
-    static let photosModeSubtitle = "Review iCloud Photos albums and export originals to a folder."
+    static let photosModeSubtitle = "Review iCloud Photos albums and export them to a folder."
     static let photosModeIcon = "icloud.and.arrow.down"
 
     static let droneModeTitle = "Organize Drone Footage"

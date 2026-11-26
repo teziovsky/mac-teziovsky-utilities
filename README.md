@@ -3,7 +3,8 @@
 Native macOS app for organizing media. From a home screen you pick a workflow:
 
 - **Export iCloud Photos** — review iCloud Photos albums and export them to a folder.
-- **Organize Local Photos** — convert legacy media, repair dates, and organize files into year folders.
+- **Organize Local Media** — convert legacy media, repair dates, and organize files into year folders.
+- **Move to External Drive** — check organized media, then move it to an archive drive with verified dates and metadata.
 - **Organize Drone Footage** — finalize a graded project folder (fully native, no external tools).
 
 > The Xcode target, scheme, and Swift module are all named `TeziovskyUtilities`; the user-facing app name is **Teziovsky Utilities** and the bundle ID is `com.teziovsky.utilities`.
@@ -21,15 +22,29 @@ Native macOS app for organizing media. From a home screen you pick a workflow:
 - Quick Look preview for the selected item (Space or ⌘Y toggles it, or double-click)
 - Videos show their duration
 
-### Organize Local Photos
+### Organize Local Media
 
 Choose a folder to scan supported media recursively. Hidden entries, packages, and symbolic links are skipped. Nothing changes during scanning. The workflow separately previews media conversion, date repairs, and file organization, and only applies a step after explicit confirmation.
 
-HEIC/HEIF images can be converted to JPEG at maximum quality. Videos in old containers (M4V, 3GP, MTS, …) that already use modern streams are rewrapped into MP4/MOV without re-encoding; videos with legacy codecs are re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Videos macOS cannot read (e.g. MKV, WMV, FLV, WebM) are listed as unsupported instead of failing mid-conversion, and a file that already has its converted twin next to it is not converted again. Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
+HEIC/HEIF images can be converted to JPEG at maximum quality. Videos in old containers (M4V, 3GP, MTS, …) that already use modern streams are rewrapped into MP4/MOV without re-encoding; videos with legacy codecs are re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Videos macOS cannot read (e.g. MKV, WMV, FLV, WebM) are listed as unsupported instead of failing mid-conversion, and a file that already has its converted twin next to it is not converted again. Android HEVC video tagged `hev1`, which macOS can't decode, is rewrapped losslessly as `hvc1` (no re-encoding). Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
 
 For date repair, the app compares Finder Created, Finder Modified, and available EXIF, TIFF, or video-container dates. EXIF dates are read together with their `OffsetTime*` fields, so photos taken in another time zone are not shifted. Placeholder timestamps from zeroed fields or reset clocks (1904, 1970 and 1980 epochs, midnight on 1 January 2000/2001) are ignored. Files whose dates do not all match the oldest valid date are listed with the current date, proposed date, and source. Repair synchronizes those dates to the oldest valid date found. Image metadata is rewritten without re-encoding (pixels stay identical) and existing offsets are kept. The original file is backed up during each repair so a failed metadata rewrite can be rolled back.
 
 For organization, each file uses that same oldest valid date. Photos move to `CURRENT_PARENT/YYYY/`; videos move to `CURRENT_PARENT/YYYY/_Filmy/`. The motion part of a Live Photo (a `.MOV` with the same name as a HEIC/JPEG in the same folder) stays next to its still and keeps the still's final name. Files already in the computed destination are skipped. A file under an incorrect year moves to the correct sibling year; if that sibling lies outside the scanned folder, the file is reported instead. Only 4-digit names from 1900 to next year count as year folders. Scans also report backups and temporary files left by an interrupted repair. Existing destination names are preserved by numbering the incoming file, for example `photo (1).jpg`. Empty source folders are left in place. Supported extensions are editable in Settings → Local Media.
+
+### Move to External Drive
+
+Start it from the home screen (it never runs on its own). Choose the two folders in Settings → External Drive: the source folder to move from and the folder on the drive to move to. Both are remembered as sandbox bookmarks; ⌘O picks another source folder for the current session only. Files keep their relative path, so `2024/IMG_0001.jpg` goes to the same place on the drive.
+
+**The check.** Opening the workflow checks the source folder with the Organize Local Media scanner and sorts every file into a bucket: *ready to move*, *need organizing*, *already on the drive*, *not media* (left in place) and *problems*. A file is ready only if it sits in the right `YYYY` (or `YYYY/_Filmy`) folder, its dates are consistent, no conversion is pending and a usable date was found. Files that need work can be opened in Organize Local Media. A Live Photo's still and motion part move together as one unit.
+
+**The move.** Each file is copied to a hidden `.partial` file next to its destination, renamed to its final name without overwriting anything, then its extended attributes, dates and flags are restored. Before the original goes to the Trash the app verifies size, dates, flags, every extended attribute and the SHA-256 of the content. A unit is all-or-nothing: if any file fails, nothing of it is kept on the drive and the original stays. An existing file on the drive is never overwritten.
+
+**Date precision.** On exFAT drives Finder Created is stored to the whole second and Modified to 10 ms. That is a file-system limit and is the same as copying in Finder; the check compares dates at the drive's resolution.
+
+**Originals already on the drive.** *Trash Originals Already on <drive>…* is offered only for files whose copy on the drive is identical (same size, dates, flags, extended attributes and content); it asks first.
+
+**While it runs.** Progress and an ETA are shown, Cancel stops after the current file (a file that isn't verified yet is left unchanged), and the Mac is kept awake. If the drive is disconnected the run stops. At the end you get one notification and a summary; **Show Log** reveals the log of every file in Finder.
 
 ### Organize Drone Footage
 
@@ -47,25 +62,25 @@ Compression runs HandBrakeCLI with per-file progress and ETA. Output is written 
 
 Every workflow uses the same shortcuts, all listed in the menu bar. When a shortcut can't run right now — work is in progress, a dialog is open, or it belongs to another workflow — a banner at the bottom of the window says why instead of the key doing nothing.
 
-| Shortcut | Command | Export iCloud Photos | Organize Local Photos | Organize Drone Footage |
-|----------|---------|----------------------|-----------------------|------------------------|
-| ⇧⌘H | Go → Home | ✓ | ✓ (scan results are discarded) | ✓ |
-| ⌘[ / Esc | Go → Back one level (Esc in a text field first leaves the field) | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | previous step; never changes files |
-| ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose a project folder |
-| ⇧⌘R | File → Reveal in Finder | export folder | media folder | project folder |
-| ⌘R | View → Refresh | reload albums | rescan the folder | re-check the current step |
-| ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | continue / run step (destructive steps confirmed first) |
-| ⌥⌘Z | Edit → Undo Last Finalize Step | — | — | ✓ |
-| ⌘S | View → Toggle Sidebar | ✓ | — | — |
-| ⌘T | View → Toggle Thumbnail Display | ✓ | — | — |
-| ⌘+ / ⌘= and ⌘− | View → Larger / Smaller Thumbnails | ✓ | — | — |
-| Space / ⌘Y | View → Quick Look | ✓ | — | — |
-| ⌘E | View → Organize Album… | ✓ | — | — |
-| ⌘1…⌘9 | Albums → album 1–9 | ✓ | — | — |
-| ⌘↓ / ⌘↑ | Albums → Next / Previous Album (bound in this window only, so text fields keep them) | ✓ | — | — |
-| ←↑↓→ | Move the selection in the grid | ✓ | — | — |
+| Shortcut | Command | Export iCloud Photos | Organize Local Media | Move to External Drive | Organize Drone Footage |
+|----------|---------|----------------------|-----------------------|------------------------|------------------------|
+| ⇧⌘H | Go → Home | ✓ | ✓ (scan results are discarded) | ✓ | ✓ |
+| ⌘[ / Esc | Go → Back one level (Esc in a text field first leaves the field) | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | summary → review → home; never changes files | previous step; never changes files |
+| ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose the source folder for this session | choose a project folder |
+| ⇧⌘R | File → Reveal in Finder | export folder | media folder | source folder | project folder |
+| ⌘R | View → Refresh | reload albums | rescan the folder | Check Again | re-check the current step |
+| ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | Check Again / move… / trash originals… (confirmed first) | continue / run step (destructive steps confirmed first) |
+| ⌥⌘Z | Edit → Undo Last Finalize Step | — | — | — | ✓ |
+| ⌘S | View → Toggle Sidebar | ✓ | — | — | — |
+| ⌘T | View → Toggle Thumbnail Display | ✓ | — | — | — |
+| ⌘+ / ⌘= and ⌘− | View → Larger / Smaller Thumbnails | ✓ | — | — | — |
+| Space / ⌘Y | View → Quick Look | ✓ | — | — | — |
+| ⌘E | View → Organize Album… | ✓ | — | — | — |
+| ⌘1…⌘9 | Albums → album 1–9 | ✓ | — | — | — |
+| ⌘↓ / ⌘↑ | Albums → Next / Previous Album (bound in this window only, so text fields keep them) | ✓ | — | — | — |
+| ←↑↓→ | Move the selection in the grid | ✓ | — | — | — |
 
-Home and Back are blocked while work that must finish (or be cancelled with its Cancel button) is running: organizing an album, scanning/converting/repairing/organizing local media, HandBrake compression, or a finalize step.
+Home and Back are blocked while work that must finish (or be cancelled with its Cancel button) is running: organizing an album, scanning/converting/repairing/organizing local media, checking or moving files to the external drive, HandBrake compression, or a finalize step.
 
 ### First launch
 
@@ -147,6 +162,7 @@ Set your development team in Xcode for signed release builds outside this repo (
 - **Include Live Photo videos and RAW originals** — save companion files next to the exported photo (default on)
 - **Drone → Compressed suffix** — suffix HandBrake adds to compressed files (default: `_COMPRESSED`)
 - **Drone → Raw / Export folder names** — subfolder names used by the drone finalize step (defaults: `raw`, `export`)
+- **External Drive → Source / Drive folder** — the folder to move from and the folder on the drive to move to (remembered as sandbox bookmarks)
 - **Local Media → File extensions** — media extensions included by local conversion, date repair, and organization
 - **Local Media → Media conversion** — enable each conversion, keep or replace originals, and choose codec/container
 

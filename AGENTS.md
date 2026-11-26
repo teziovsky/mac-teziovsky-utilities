@@ -2,8 +2,8 @@
 
 ## Project conventions (all agents)
 
-Follow these rules when changing the app. They keep the three workflows (Export iCloud
-Photos, Organize Local Photos, Organize Drone Footage) behaving the same way.
+Follow these rules when changing the app. They keep the four workflows (Export iCloud
+Photos, Organize Local Media, Move to External Drive, Organize Drone Footage) behaving the same way.
 
 ### Keyboard shortcuts and commands
 
@@ -55,7 +55,7 @@ Photos, Organize Local Photos, Organize Drone Footage) behaving the same way.
   `confirmationDialog` whose Cancel is the default action. The button label ends with
   "…" (e.g. "Organize 12 Files…").
 - Step state lives in the service or coordinator (`LocalPhotosService.workflowStep`,
-  `DroneWorkflowCoordinator.phase`), not in view `@State`, so commands can drive it.
+  `ExternalDriveTransferService.step`, `DroneWorkflowCoordinator.phase`), not in view `@State`, so commands can drive it.
 - Home and Back buttons stay enabled and go through `appState.run(...)`, so a blocked
   click shows the same banner as the shortcut.
 - Use `GlassCard` and `pillActionButton(prominent:)` for cards and buttons. Align a file

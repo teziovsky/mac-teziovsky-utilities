@@ -51,6 +51,11 @@ struct SettingsView: View {
                     Label("Local Media", systemImage: "folder.badge.gearshape")
                 }
 
+            ExternalDriveSettingsTab()
+                .tabItem {
+                    Label("External Drive", systemImage: "externaldrive")
+                }
+
             DroneSettingsTab(
                 compressedSuffix: persisted($droneCompressedSuffix) { AppSettings.droneCompressedSuffix = $0 },
                 rawDirectoryName: persisted($droneRawDirectoryName) { AppSettings.droneRawDirectoryName = $0 },

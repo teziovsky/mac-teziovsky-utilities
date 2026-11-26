@@ -145,6 +145,17 @@ struct ExternalDriveLog: Sendable {
 
     let fileURL: URL
 
+    /// Creates the (empty) log file if no run has written one yet, so "Show Log" has something to reveal.
+    func ensureFileExists() {
+        let url = fileURL
+        Self.queue.sync {
+            let manager = FileManager.default
+            guard !manager.fileExists(atPath: url.path) else { return }
+            try? manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            manager.createFile(atPath: url.path, contents: nil)
+        }
+    }
+
     func append(_ line: String) {
         let url = fileURL
         Self.queue.sync {

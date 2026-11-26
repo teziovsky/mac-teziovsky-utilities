@@ -188,6 +188,11 @@ final class ExternalDriveTransferService: ObservableObject {
         check()
     }
 
+    /// Forgets this session's ⌘O folder (one was just saved in Settings), so the next check uses the saved one.
+    func forgetSessionSource() {
+        sourceOverride = nil
+    }
+
     private nonisolated static func classify(
         _ scan: FileDateScanOutputs, source: URL, destination: URL, extensions: Set<String>
     ) -> (review: ExternalDriveReview, fingerprints: [String: FileMetadataFingerprint]) {
@@ -276,6 +281,11 @@ final class ExternalDriveTransferService: ObservableObject {
     func setRunningForTesting(transferring: Bool = false, checking: Bool = false) {
         (isTransferring, isChecking, runKind) = (transferring, checking, transferring ? .move : nil)
     }
+
+    /// Test-only: sets the source the commands see, without resolving settings or starting a check.
+    func setSourceForTesting(_ url: URL?) {
+        sourceURL = url
+    }
     #endif
 }
 
@@ -361,7 +371,7 @@ extension ExternalDriveTransferService {
                 }
             }
             let outcome = Self.runUnit(unit, in: run, mover: mover, report: report)
-            let description = Self.describe(outcome, destinationName: run.destinationName)
+            let description = ExternalDriveText.logLine(for: outcome, destinationName: run.destinationName)
             for path in unit.relativePaths { run.log("\(path): \(description)") }
             return outcome
         }.value
@@ -381,20 +391,6 @@ extension ExternalDriveTransferService {
         case .trashExisting:
             return mover.trashOriginalIfIdentical(unit, sourceRoot: run.source,
                                                   destinationRoot: run.destinationRoot)
-        }
-    }
-
-    /// The outcome as written in the log, after the file's path.
-    private nonisolated static func describe(_ outcome: ExternalDriveUnitOutcome, destinationName: String) -> String {
-        switch outcome {
-        case .moved: return "moved"
-        case .alreadyOnDestination: return "already on \(destinationName), not copied"
-        case .cancelled: return "cancelled"
-        case let .failed(message): return "failed: \(message)"
-        case let .verifiedButNotTrashed(message): return "copied and verified, original not trashed: \(message)"
-        case .trashedOriginal: return "original moved to the Trash"
-        case let .differentFileOnDestination(message): return "different file on \(destinationName): \(message)"
-        case .destinationUnavailable: return "\(destinationName) unavailable"
         }
     }
 

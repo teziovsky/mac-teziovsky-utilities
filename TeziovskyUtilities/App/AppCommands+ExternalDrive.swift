@@ -18,3 +18,35 @@ extension AppState {
         externalDriveService.useSource(url)
     }
 }
+
+extension AppState {
+    /// "Choose…" for a saved folder (the review's choosers and Settings): opens the panel at the suggested
+    /// place, stores the folder and re-checks the workflow when it is open and idle. Returns whether one was chosen.
+    @discardableResult
+    func chooseExternalDriveFolder(_ role: ExternalDriveFolderRole) -> Bool {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = role == .source ? "Choose the folder to move from" : "Choose the folder on the drive"
+        panel.prompt = "Choose"
+        panel.directoryURL = URL(fileURLWithPath: role.suggestedPath)
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        AppSettings.storeExternalDriveFolder(url, role: role)
+        if role == .source {
+            externalDriveService.forgetSessionSource()
+        }
+        if route == .externalDrive, !externalDriveService.isRunning {
+            externalDriveService.check()
+        }
+        return true
+    }
+
+    /// Reveals the drive-move log in Finder, creating it first so there is always a file to show.
+    func showExternalDriveLog() {
+        let log = ExternalDriveLog.shared
+        log.ensureFileExists()
+        NSWorkspace.shared.activateFileViewerSelecting([log.fileURL])
+    }
+}

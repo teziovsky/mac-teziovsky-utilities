@@ -300,6 +300,21 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         XCTAssertEqual(service.review?.readyUnits.map(\.id), ["2024/z.jpg"])
     }
 
+    /// Choosing the source in Settings (or the review's chooser) replaces this session's ⌘O folder.
+    func testForgettingTheSessionSourceChecksTheSavedFolder() async throws {
+        let other = root.appendingPathComponent("other", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        let service = makeService()
+        service.useSource(other)
+        try await waitUntilIdle(service)
+
+        service.forgetSessionSource()
+        service.check()
+        try await waitUntilIdle(service)
+
+        XCTAssertEqual(service.sourceURL, src)
+    }
+
     /// xctest has a bundle identifier ("com.apple.dt.xctest.tool") but no app bundle; posting must not crash.
     func testNotifierIsANoOpOutsideAnAppBundle() {
         XCTAssertNotEqual(Bundle.main.bundleURL.pathExtension, "app")

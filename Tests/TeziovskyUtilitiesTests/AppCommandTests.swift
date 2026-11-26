@@ -55,7 +55,7 @@ final class AppCommandDecisionTests: XCTestCase {
         XCTAssertNil(state.externalDriveService.sourceURL)
         assertNotice(state.decision(for: .refresh), contains: "Choose the source folder first (⌘O)")
         assertNotice(state.decision(for: .reveal), contains: "Choose the source folder first (⌘O)")
-        state.externalDriveService.useSource(root)
+        state.externalDriveService.setSourceForTesting(root)
         XCTAssertEqual(state.decision(for: .refresh), .perform)
         XCTAssertEqual(state.decision(for: .reveal), .perform)
         state.externalDriveService.reset()
@@ -81,7 +81,7 @@ final class AppCommandDecisionTests: XCTestCase {
     func testLeavingExternalDriveHomeResetsTheService() {
         let state = makeState()
         state.route = .externalDrive
-        state.externalDriveService.useSource(root)
+        state.externalDriveService.setSourceForTesting(root)
         state.run(.home)
         XCTAssertEqual(state.route, .home)
         XCTAssertEqual(state.externalDriveService.step, .review)

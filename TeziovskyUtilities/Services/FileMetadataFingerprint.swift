@@ -9,6 +9,15 @@ struct MetadataDifference: Equatable, Sendable {
     let after: String
 }
 
+/// Timestamp granularity a volume can store, per field: exFAT keeps a set Created date only to the second
+/// but Modified to 10 ms.
+struct TimestampResolution: Equatable, Sendable {
+    let creation: TimeInterval
+    let modification: TimeInterval
+
+    static let microsecond = TimestampResolution(creation: 0.000_001, modification: 0.000_001)
+}
+
 /// Everything a copy must preserve for it to count as identical: size, Finder dates, BSD flags,
 /// extended attributes (by SHA-256) and, optionally, the content (by SHA-256).
 struct FileMetadataFingerprint: Equatable, Sendable {
@@ -118,7 +127,7 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     static func differences(
         source: FileMetadataFingerprint,
         destination: FileMetadataFingerprint,
-        timeResolution: TimeInterval,
+        resolution: TimestampResolution,
         ignoredDestinationOnlyXattrs: Set<String> = [provenanceXattr]
     ) -> [MetadataDifference] {
         var result: [MetadataDifference] = []
@@ -126,12 +135,12 @@ struct FileMetadataFingerprint: Equatable, Sendable {
         if source.size != destination.size {
             result.append(MetadataDifference(field: "size", before: "\(source.size)", after: "\(destination.size)"))
         }
-        if !sameInstant(source.creationNanoseconds, destination.creationNanoseconds, resolution: timeResolution) {
+        if !sameInstant(source.creationNanoseconds, destination.creationNanoseconds, resolution: resolution.creation) {
             result.append(MetadataDifference(
                 field: "created", before: describe(source.creationDate), after: describe(destination.creationDate)))
         }
         if !sameInstant(source.modificationNanoseconds, destination.modificationNanoseconds,
-                        resolution: timeResolution) {
+                        resolution: resolution.modification) {
             result.append(MetadataDifference(
                 field: "modified", before: describe(source.modificationDate),
                 after: describe(destination.modificationDate)))
@@ -195,7 +204,7 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     // MARK: Volume time resolution
 
     /// Timestamp granularity the volume holding `url` can store; nil when it cannot be determined.
-    static func timeResolution(forVolumeOf url: URL) -> TimeInterval? {
+    static func timeResolution(forVolumeOf url: URL) -> TimestampResolution? {
         var info = statfs()
         guard statfs(url.path, &info) == 0 else { return nil }
         let type = withUnsafePointer(to: &info.f_fstypename) { pointer in
@@ -205,11 +214,11 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     }
 
     /// HFS+ stores whole seconds; anything unknown is treated as the coarsest 1 s.
-    static func timeResolution(forFileSystemType type: String) -> TimeInterval {
+    static func timeResolution(forFileSystemType type: String) -> TimestampResolution {
         switch type {
-        case "exfat": return 0.01
-        case "apfs": return 0.000_001
-        default: return 1
+        case "exfat": return TimestampResolution(creation: 1, modification: 0.01)
+        case "apfs": return .microsecond
+        default: return TimestampResolution(creation: 1, modification: 1)
         }
     }
 }

@@ -4,13 +4,13 @@ import Foundation
 import XCTest
 
 final class ExternalDriveMoverTests: XCTestCase {
-    private var root: URL!
-    private var src: URL!
-    private var dst: URL!
-    private var trash: FakeTrash!
-    private let tagsXattr = "com.apple.metadata:_kMDItemUserTags"
-    private let quarantine = "0081;00000000;Safari;"
-    private let changedMessage = "Changed since the check. Check again (⌘R)."
+    var root: URL!
+    var src: URL!
+    var dst: URL!
+    var trash: MoverFakeTrash!
+    let tagsXattr = "com.apple.metadata:_kMDItemUserTags"
+    let quarantine = "0081;00000000;Safari;"
+    let changedMessage = "Changed since the check. Check again (⌘R)."
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -20,7 +20,7 @@ final class ExternalDriveMoverTests: XCTestCase {
         for folder in [src!, dst!] {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         }
-        trash = try FakeTrash(folder: root.appendingPathComponent("Trash", isDirectory: true))
+        trash = try MoverFakeTrash(folder: root.appendingPathComponent("Trash", isDirectory: true))
     }
 
     override func tearDownWithError() throws {
@@ -36,13 +36,13 @@ final class ExternalDriveMoverTests: XCTestCase {
 
     // MARK: Fixtures
 
-    private func setXattr(_ name: String, _ value: String, on url: URL) {
+    func setXattr(_ name: String, _ value: String, on url: URL) {
         let bytes = Array(value.utf8)
         XCTAssertEqual(setxattr(url.path, name, bytes, bytes.count, 0, XATTR_NOFOLLOW), 0, "errno \(errno)")
     }
 
     /// Exact nanosecond birth and modification times, in one call.
-    private func setDates(created: Int64, modified: Int64, on url: URL) {
+    func setDates(created: Int64, modified: Int64, on url: URL) {
         var list = attrlist()
         list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
         list.commonattr = attrgroup_t(ATTR_CMN_CRTIME | ATTR_CMN_MODTIME)
@@ -54,14 +54,14 @@ final class ExternalDriveMoverTests: XCTestCase {
         XCTAssertEqual(result, 0, "setattrlist failed: errno \(errno)")
     }
 
-    private static func nanoseconds(_ iso: String, extra: Int64 = 0) -> Int64 {
+    static func nanoseconds(_ iso: String, extra: Int64 = 0) -> Int64 {
         let date = ISO8601DateFormatter().date(from: iso)!
         return Int64(date.timeIntervalSince1970) * 1_000_000_000 + extra
     }
 
     @discardableResult
-    private func makeSource(_ relativePath: String, contents: Data = Data("photo bytes".utf8),
-                            hidden: Bool = false) throws -> URL {
+    func makeSource(_ relativePath: String, contents: Data = Data("photo bytes".utf8),
+                    hidden: Bool = false, locked: Bool = false) throws -> URL {
         let url = src.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -71,10 +71,15 @@ final class ExternalDriveMoverTests: XCTestCase {
         if hidden { XCTAssertEqual(lchflags(url.path, UInt32(UF_HIDDEN)), 0) }
         setDates(created: Self.nanoseconds("2019-03-07T10:00:00Z", extra: 123_456_789),
                  modified: Self.nanoseconds("2019-03-08T11:30:00Z", extra: 987_654_321), on: url)
+        // Locked last: an immutable file refuses the other writes.
+        if locked {
+            let flags = UInt32(UF_IMMUTABLE) | (hidden ? UInt32(UF_HIDDEN) : 0)
+            XCTAssertEqual(lchflags(url.path, flags), 0)
+        }
         return url
     }
 
-    private func fingerprints(_ paths: [String]) throws -> [String: FileMetadataFingerprint] {
+    func fingerprints(_ paths: [String]) throws -> [String: FileMetadataFingerprint] {
         var result: [String: FileMetadataFingerprint] = [:]
         for path in paths {
             result[path] = try FileMetadataFingerprint.read(src.appendingPathComponent(path), includeContent: false)
@@ -82,33 +87,33 @@ final class ExternalDriveMoverTests: XCTestCase {
         return result
     }
 
-    private func unit(_ paths: [String]) -> ExternalDriveUnit {
+    func unit(_ paths: [String]) -> ExternalDriveUnit {
         ExternalDriveUnit(relativePaths: paths, byteCount: 0)
     }
 
-    private func move(_ paths: [String], mover: ExternalDriveMover? = nil,
-                      checked: [String: FileMetadataFingerprint]? = nil,
-                      destinationRoot: URL? = nil,
-                      progress: @escaping @Sendable (Int64) -> Bool = { _ in true }) throws
+    func move(_ paths: [String], mover: ExternalDriveMover? = nil,
+              checked: [String: FileMetadataFingerprint]? = nil,
+              destinationRoot: URL? = nil,
+              progress: @escaping @Sendable (Int64) -> Bool = { _ in true }) throws
         -> ExternalDriveUnitOutcome {
         let mover = mover ?? ExternalDriveMover(trash: trash.trash)
         return mover.move(unit(paths), sourceRoot: src, destinationRoot: destinationRoot ?? dst,
                           checkedFingerprints: try checked ?? fingerprints(paths), progress: progress)
     }
 
-    private func exists(_ url: URL) -> Bool {
+    func exists(_ url: URL) -> Bool {
         var info = stat()
         return lstat(url.path, &info) == 0
     }
 
     /// Every entry (files and folders) under the destination root.
-    private func destinationEntries() -> [String] {
+    func destinationEntries() -> [String] {
         (FileManager.default.enumerator(atPath: dst.path)?.allObjects as? [String] ?? []).sorted()
     }
 
-    private func identical(_ source: FileMetadataFingerprint, _ destination: URL) throws -> [MetadataDifference] {
+    func identical(_ source: FileMetadataFingerprint, _ destination: URL) throws -> [MetadataDifference] {
         FileMetadataFingerprint.differences(
-            source: source, destination: try .read(destination, includeContent: true), timeResolution: 0.000_001)
+            source: source, destination: try .read(destination, includeContent: true), resolution: .microsecond)
     }
 
     // MARK: Tests
@@ -135,7 +140,7 @@ final class ExternalDriveMoverTests: XCTestCase {
     func testFlagsDroppedByTheCopyAreRestored() throws {
         let source = try makeSource("hidden.jpg", hidden: true)
         let before = try FileMetadataFingerprint.read(source, includeContent: true)
-        let copier = HookCopier { partial in XCTAssertEqual(lchflags(partial.path, 0), 0) }
+        let copier = MoverHookCopier { partial in XCTAssertEqual(lchflags(partial.path, 0), 0) }
 
         XCTAssertEqual(try move(["hidden.jpg"], mover: ExternalDriveMover(copier: copier, trash: trash.trash)), .moved)
         XCTAssertEqual(try identical(before, dst.appendingPathComponent("hidden.jpg")), [])
@@ -165,7 +170,7 @@ final class ExternalDriveMoverTests: XCTestCase {
     func testDestinationCreatedAfterCheckIsNotOverwritten() throws {
         try makeSource("2019/a.jpg")
         let destination = dst.appendingPathComponent("2019/a.jpg")
-        let copier = HookCopier { partial in
+        let copier = MoverHookCopier { partial in
             XCTAssertEqual(partial.lastPathComponent, ".a.jpg.partial")
             try Data("raced".utf8).write(to: destination)
         }
@@ -204,8 +209,8 @@ final class ExternalDriveMoverTests: XCTestCase {
         let motion = "2019/IMG_0001.MOV"
         try makeSource(still, contents: Data("still image".utf8))
         try makeSource(motion, contents: Data("motion video".utf8))
-        let log = LogRecorder()
-        let copier = HookCopier { partial in
+        let log = MoverLogRecorder()
+        let copier = MoverHookCopier { partial in
             guard partial.lastPathComponent == ".IMG_0001.MOV.partial" else { return }
             var data = try Data(contentsOf: partial)
             data[0] ^= 0xFF
@@ -229,7 +234,7 @@ final class ExternalDriveMoverTests: XCTestCase {
         try makeSource("2019/a.jpg")
         let existingFolder = dst.appendingPathComponent("2019")
         try FileManager.default.createDirectory(at: existingFolder, withIntermediateDirectories: true)
-        let copier = HookCopier { partial in try Data("corrupt!!!!".utf8).write(to: partial) }
+        let copier = MoverHookCopier { partial in try Data("corrupt!!!!".utf8).write(to: partial) }
 
         let outcome = try move(["2019/a.jpg"], mover: ExternalDriveMover(copier: copier, trash: trash.trash))
 
@@ -240,7 +245,7 @@ final class ExternalDriveMoverTests: XCTestCase {
     func testCancelMidCopyLeavesNoPartialAndKeepsSource() throws {
         let contents = Data((0..<(16 * 1024 * 1024)).map { UInt8(truncatingIfNeeded: $0 &* 31) })
         let source = try makeSource("2019/big.mov", contents: contents)
-        let calls = ProgressRecorder()
+        let calls = MoverProgressRecorder()
 
         let outcome = try move(["2019/big.mov"]) { bytes in
             calls.append(bytes)
@@ -280,7 +285,7 @@ final class ExternalDriveMoverTests: XCTestCase {
     func testUnitProgressIsCumulativeAcrossMembers() throws {
         try makeSource("a.heic", contents: Data(repeating: 1, count: 3000))
         try makeSource("a.mov", contents: Data(repeating: 2, count: 5000))
-        let calls = ProgressRecorder()
+        let calls = MoverProgressRecorder()
 
         XCTAssertEqual(try move(["a.heic", "a.mov"]) { calls.append($0); return true }, .moved)
 
@@ -303,7 +308,7 @@ final class ExternalDriveMoverTests: XCTestCase {
     func testTrashFailureKeepsVerifiedCopy() throws {
         let source = try makeSource("a.jpg")
         let before = try FileMetadataFingerprint.read(source, includeContent: true)
-        let log = LogRecorder()
+        let log = MoverLogRecorder()
         let mover = ExternalDriveMover(trash: { _ in throw CocoaError(.fileWriteNoPermission) }, log: log.append)
 
         let outcome = try move(["a.jpg"], mover: mover)
@@ -327,84 +332,10 @@ final class ExternalDriveMoverTests: XCTestCase {
 
 }
 
-// MARK: - Already on the destination, and the exFAT rename fallback
-
-extension ExternalDriveMoverTests {
-    func testTrashOriginalIfIdenticalTrashesOnlyWhenIdentical() throws {
-        // An identical copy: a move whose trash step failed leaves one behind.
-        let source = try makeSource("same.jpg")
-        let keepingMover = ExternalDriveMover(trash: { _ in throw CocoaError(.fileWriteNoPermission) })
-        guard case .verifiedButNotTrashed = try move(["same.jpg"], mover: keepingMover) else {
-            return XCTFail("fixture")
-        }
-        let mover = ExternalDriveMover(trash: trash.trash)
-        XCTAssertEqual(mover.trashOriginalIfIdentical(unit(["same.jpg"]), sourceRoot: src, destinationRoot: dst),
-                       .trashedOriginal)
-        XCTAssertEqual(trash.trashed, [source])
-
-        let other = try makeSource("other.jpg", contents: Data("mine".utf8))
-        try Data("theirs".utf8).write(to: dst.appendingPathComponent("other.jpg"))
-        let outcome = mover.trashOriginalIfIdentical(unit(["other.jpg"]), sourceRoot: src, destinationRoot: dst)
-        guard case .differentFileOnDestination(let summary) = outcome else { return XCTFail("\(outcome)") }
-        XCTAssertFalse(summary.isEmpty)
-        XCTAssertTrue(exists(other))
-        XCTAssertEqual(trash.trashed, [source])
-    }
-
-    func testTrashOriginalIfIdenticalNeverTrashesTheOnlyCopy() throws {
-        let source = try makeSource("a.jpg")
-        let mover = ExternalDriveMover(trash: trash.trash)
-
-        let sameRoot = mover.trashOriginalIfIdentical(unit(["a.jpg"]), sourceRoot: src, destinationRoot: src)
-        guard case .failed = sameRoot else { return XCTFail("\(sameRoot)") }
-
-        let missing = mover.trashOriginalIfIdentical(unit(["a.jpg"]), sourceRoot: src, destinationRoot: dst)
-        guard case .failed = missing else { return XCTFail("\(missing)") }
-
-        try FileManager.default.createSymbolicLink(at: dst.appendingPathComponent("a.jpg"), withDestinationURL: source)
-        let link = mover.trashOriginalIfIdentical(unit(["a.jpg"]), sourceRoot: src, destinationRoot: dst)
-        guard case .failed = link else { return XCTFail("\(link)") }
-
-        XCTAssertTrue(exists(source))
-        XCTAssertTrue(trash.trashed.isEmpty)
-    }
-
-    /// exFAT (FSKit) has no RENAME_EXCL; the fallback must still never replace an existing file.
-    func testRenameFallbackWithoutExclusiveRenameNeverReplaces() throws {
-        let partial = dst.appendingPathComponent(".a.jpg.partial")
-        let final = dst.appendingPathComponent("a.jpg")
-        try Data("copy".utf8).write(to: partial)
-
-        XCTAssertNil(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: final))
-        XCTAssertEqual(try Data(contentsOf: final), Data("copy".utf8))
-        XCTAssertFalse(exists(partial))
-
-        try Data("second".utf8).write(to: partial)
-        XCTAssertEqual(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: final)?.code, .EEXIST)
-        XCTAssertEqual(try Data(contentsOf: final), Data("copy".utf8))
-        XCTAssertEqual(try Data(contentsOf: partial), Data("second".utf8))
-
-        let link = dst.appendingPathComponent("link.jpg")
-        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/nonexistent/x")
-        XCTAssertEqual(ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: link)?.code, .EEXIST)
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), "/nonexistent/x")
-    }
-
-    func testUnicodePathsRoundTrip() throws {
-        let path = "Święta/Wigilia 2025/żółw.jpg"
-        let source = try makeSource(path)
-        let before = try FileMetadataFingerprint.read(source, includeContent: true)
-
-        XCTAssertEqual(try move([path]), .moved)
-        XCTAssertEqual(try identical(before, dst.appendingPathComponent(path)), [])
-        XCTAssertTrue(trash.trashed.contains(source))
-    }
-}
-
 // MARK: - Test doubles
 
 /// Moves files into a temporary folder instead of the real Trash and records what it got.
-private final class FakeTrash: @unchecked Sendable {
+final class MoverFakeTrash: @unchecked Sendable {
     private let folder: URL
     private let lock = NSLock()
     private var urls: [URL] = []
@@ -418,6 +349,11 @@ private final class FakeTrash: @unchecked Sendable {
 
     var trash: @Sendable (URL) throws -> Void {
         { [self] url in
+            // The real Trash takes a Finder-"Locked" file; a plain rename doesn't, so unlock it first.
+            var info = stat()
+            if lstat(url.path, &info) == 0, info.st_flags & UInt32(UF_IMMUTABLE) != 0 {
+                lchflags(url.path, info.st_flags & ~UInt32(UF_IMMUTABLE))
+            }
             try FileManager.default.moveItem(at: url, to: folder.appendingPathComponent(UUID().uuidString))
             lock.withLock { urls.append(url) }
         }
@@ -425,7 +361,7 @@ private final class FakeTrash: @unchecked Sendable {
 }
 
 /// Copies for real, then runs `afterCopy` on the partial file.
-private struct HookCopier: ExternalDriveCopying {
+struct MoverHookCopier: ExternalDriveCopying {
     let afterCopy: @Sendable (URL) throws -> Void
 
     func copy(from source: URL, to destination: URL, progress: (Int64) -> Bool) throws {
@@ -434,14 +370,14 @@ private struct HookCopier: ExternalDriveCopying {
     }
 }
 
-private final class LogRecorder: @unchecked Sendable {
+final class MoverLogRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String] = []
     var lines: [String] { lock.withLock { stored } }
     var append: @Sendable (String) -> Void { { [self] line in lock.withLock { stored.append(line) } } }
 }
 
-private final class ProgressRecorder: @unchecked Sendable {
+final class MoverProgressRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [Int64] = []
     var values: [Int64] { lock.withLock { stored } }

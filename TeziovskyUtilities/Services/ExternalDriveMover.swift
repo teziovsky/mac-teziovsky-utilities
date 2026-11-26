@@ -57,10 +57,19 @@ enum ExternalDriveUnitOutcome: Sendable, Equatable {
     case destinationUnavailable
 }
 
+/// How a finished partial copy gets its final name. Both never replace an existing file.
+enum ExternalDriveRenameStrategy: Sendable {
+    /// `renamex_np(RENAME_EXCL)`, falling back to `.reserveName` where the volume lacks it (exFAT).
+    case exclusiveRename
+    /// Claim the name with an exclusive create, then rename over that placeholder. Forced only by tests.
+    case reserveName
+}
+
 /// Moves one unit (a file, or a Live Photo pair) to the archive drive: copy, prove each copy identical,
 /// and only then trash the originals. A unit that doesn't fully verify leaves no copies behind.
 struct ExternalDriveMover: Sendable {
     static let changedMessage = "Changed since the check. Check again (⌘R)."
+    static let nothingToMoveMessage = "Nothing to move"
     static let defaultTrash: @Sendable (URL) throws -> Void = { url in
         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
@@ -68,13 +77,16 @@ struct ExternalDriveMover: Sendable {
     private let copier: ExternalDriveCopying
     private let trash: @Sendable (URL) throws -> Void
     private let log: @Sendable (String) -> Void
+    private let renameStrategy: ExternalDriveRenameStrategy
 
     init(copier: ExternalDriveCopying = CopyfileCopier(),
          trash: @escaping @Sendable (URL) throws -> Void = defaultTrash,
-         log: @escaping @Sendable (String) -> Void = { _ in }) {
+         log: @escaping @Sendable (String) -> Void = { _ in },
+         renameStrategy: ExternalDriveRenameStrategy = .exclusiveRename) {
         self.copier = copier
         self.trash = trash
         self.log = log
+        self.renameStrategy = renameStrategy
     }
 
     private struct Member {
@@ -105,6 +117,7 @@ struct ExternalDriveMover: Sendable {
     func move(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL,
               checkedFingerprints: [String: FileMetadataFingerprint],
               progress: @Sendable (Int64) -> Bool) -> ExternalDriveUnitOutcome {
+        guard !unit.relativePaths.isEmpty else { return .failed(Self.nothingToMoveMessage) }
         var members: [Member] = []
         for path in unit.relativePaths {
             guard let checked = checkedFingerprints[path],
@@ -114,14 +127,7 @@ struct ExternalDriveMover: Sendable {
             }
             members.append(member)
         }
-        for member in members {
-            switch ExternalDriveMoverFileSystem.entryExists(member.destination) {
-            case .success(true): return .alreadyOnDestination
-            case .success(false): continue
-            case .failure(let error):
-                return .failed("Couldn't check \(member.relativePath) on the drive: \(error.localizedDescription)")
-            }
-        }
+        if let outcome = existingDestinationOutcome(members) { return outcome }
 
         let created = Created()
         do {
@@ -144,6 +150,19 @@ struct ExternalDriveMover: Sendable {
         return trashSources(of: members)
     }
 
+    /// `.alreadyOnDestination` when any member's destination exists (even a dangling symlink); nil when none do.
+    private func existingDestinationOutcome(_ members: [Member]) -> ExternalDriveUnitOutcome? {
+        for member in members {
+            switch ExternalDriveMoverFileSystem.entryExists(member.destination) {
+            case .success(true): return .alreadyOnDestination
+            case .success(false): continue
+            case .failure(let error):
+                return .failed("Couldn't check \(member.relativePath) on the drive: \(error.localizedDescription)")
+            }
+        }
+        return nil
+    }
+
     private func currentMember(_ path: String, sourceRoot: URL, destinationRoot: URL) -> Member? {
         let source = sourceRoot.appendingPathComponent(path)
         guard let fingerprint = try? FileMetadataFingerprint.read(source, includeContent: false) else { return nil }
@@ -160,7 +179,7 @@ struct ExternalDriveMover: Sendable {
             size: checked.size, creationNanoseconds: checked.creationNanoseconds,
             modificationNanoseconds: checked.modificationNanoseconds, flags: checked.flags,
             xattrDigests: checked.xattrDigests, contentDigest: nil)
-        return FileMetadataFingerprint.differences(source: checked, destination: current, timeResolution: 0.000_001)
+        return FileMetadataFingerprint.differences(source: checked, destination: current, resolution: .microsecond)
             .isEmpty
     }
 
@@ -207,7 +226,19 @@ struct ExternalDriveMover: Sendable {
         }
         if cancelRequested { throw Stop(outcome: .cancelled) }
 
-        if let error = ExternalDriveMoverFileSystem.renameWithoutReplacing(from: partial, to: member.destination) {
+        // copyfile copies a Finder-"Locked" source's flag, which would block the rename and the fix-ups;
+        // `fixUpMetadata` puts the source's flags back last.
+        if let error = ExternalDriveMoverFileSystem.clearLockFlags(partial) {
+            throw Stop(outcome: .failed(
+                "Couldn't unlock the copy of \(member.relativePath): \(error.localizedDescription)"))
+        }
+        let renameError: POSIXError? = switch renameStrategy {
+        case .exclusiveRename:
+            ExternalDriveMoverFileSystem.renameWithoutReplacing(from: partial, to: member.destination)
+        case .reserveName:
+            ExternalDriveMoverFileSystem.renameReservingName(from: partial, to: member.destination)
+        }
+        if let error = renameError {
             if error.code == .EEXIST { throw Stop(outcome: .alreadyOnDestination) }
             throw Stop(outcome: .failed(
                 "Couldn't finish copying \(member.relativePath): \(error.localizedDescription)"))
@@ -218,7 +249,8 @@ struct ExternalDriveMover: Sendable {
 
     /// `copyfile` rewrites some xattrs (e.g. `com.apple.quarantine`), leaves the birth time slightly off and,
     /// on exFAT, drops `UF_HIDDEN`, so restore the source's exact bytes, timestamps and flags. Dates follow
-    /// the xattrs (xattr writes can touch them); flags go last, so a "Locked" flag can't block the others.
+    /// the xattrs (xattr writes can touch them); flags go last because a "Locked" flag set earlier would
+    /// make the xattr and date writes fail.
     /// Anything that can't be restored is logged here and caught by verification.
     private func fixUpMetadata(of member: Member) {
         let path = member.relativePath
@@ -270,7 +302,7 @@ struct ExternalDriveMover: Sendable {
                 throw Stop(outcome: .failed(Self.changedMessage))
             }
             let differences = FileMetadataFingerprint.differences(
-                source: source, destination: destination, timeResolution: resolution)
+                source: source, destination: destination, resolution: resolution)
             for difference in differences {
                 log("\(member.relativePath): \(difference.field) differs: \(difference.before) → \(difference.after)")
             }
@@ -312,153 +344,65 @@ struct ExternalDriveMover: Sendable {
 
     /// Trashes the originals of a unit whose files are already on the destination, but only when every
     /// destination file is identical to its original (and is a different file, not the original itself).
+    /// A member whose original is already gone while its copy exists (a pair half-trashed by an earlier
+    /// run) counts as done.
     func trashOriginalIfIdentical(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL)
         -> ExternalDriveUnitOutcome {
+        guard !unit.relativePaths.isEmpty else { return .failed(Self.nothingToMoveMessage) }
+        var toTrash: [String] = []
         var firstDifference: String?
         for path in unit.relativePaths {
             let source = sourceRoot.appendingPathComponent(path)
             let destination = destinationRoot.appendingPathComponent(path)
-            do {
-                if try ExternalDriveMoverFileSystem.isSameFile(source, destination) {
-                    return .failed("\(path) on the drive is the original itself, not a copy.")
-                }
-                guard let resolution = FileMetadataFingerprint.timeResolution(
-                    forVolumeOf: destination.deletingLastPathComponent()) else {
-                    return .failed("Couldn't read the drive's file system")
-                }
-                let differences = FileMetadataFingerprint.differences(
-                    source: try .read(source, includeContent: true),
-                    destination: try .read(destination, includeContent: true),
-                    timeResolution: resolution)
-                for difference in differences {
-                    log("\(path): \(difference.field) differs: \(difference.before) → \(difference.after)")
-                }
-                if firstDifference == nil, let difference = differences.first {
-                    firstDifference = "\(path): \(difference.field) differs: \(difference.before) → \(difference.after)"
-                }
-            } catch {
-                return .failed("Couldn't compare \(path) with the drive: \(error.localizedDescription)")
+            if case .success(false) = ExternalDriveMoverFileSystem.entryExists(source),
+               case .success(true) = ExternalDriveMoverFileSystem.entryExists(destination) {
+                log("\(path): the original is already gone; the copy on the drive stays.")
+                continue
+            }
+            switch compare(path, source: source, destination: destination) {
+            case .failure(let stop): return stop.outcome
+            case .success(let difference):
+                firstDifference = firstDifference ?? difference
+                toTrash.append(path)
             }
         }
         if let firstDifference { return .differentFileOnDestination(firstDifference) }
 
-        for path in unit.relativePaths {
+        var failure: String?
+        for path in toTrash {
             do {
                 try trash(sourceRoot.appendingPathComponent(path))
             } catch {
                 log("\(path): couldn't move the original to the Trash: \(error.localizedDescription)")
-                return .failed("The original couldn't be moved to the Trash: \(error.localizedDescription)")
+                failure = failure ?? error.localizedDescription
             }
         }
+        if let failure { return .failed("The original couldn't be moved to the Trash: \(failure)") }
         return .trashedOriginal
     }
-}
 
-/// Thin POSIX wrappers that never follow symlinks.
-enum ExternalDriveMoverFileSystem {
-    private static func lastError() -> POSIXError {
-        POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-
-    /// True for anything at `url`, including a dangling symlink.
-    static func entryExists(_ url: URL) -> Result<Bool, POSIXError> {
-        var info = stat()
-        if lstat(url.path, &info) == 0 { return .success(true) }
-        return errno == ENOENT ? .success(false) : .failure(lastError())
-    }
-
-    static func isDirectory(_ url: URL) -> Bool {
-        var info = stat()
-        return stat(url.path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
-    }
-
-    /// `true` when this call created the folder; an existing non-folder is an error.
-    static func makeFolderIfMissing(_ url: URL) -> Result<Bool, POSIXError> {
-        var info = stat()
-        if lstat(url.path, &info) == 0 {
-            return info.st_mode & S_IFMT == S_IFDIR ? .success(false) : .failure(POSIXError(.ENOTDIR))
+    /// The first difference between an original and its copy (nil when identical), or why they can't be compared.
+    private func compare(_ path: String, source: URL, destination: URL)
+        -> Result<String?, Stop> {
+        do {
+            if try ExternalDriveMoverFileSystem.isSameFile(source, destination) {
+                return .failure(Stop(outcome: .failed("\(path) on the drive is the original itself, not a copy.")))
+            }
+            guard let resolution = FileMetadataFingerprint.timeResolution(
+                forVolumeOf: destination.deletingLastPathComponent()) else {
+                return .failure(Stop(outcome: .failed("Couldn't read the drive's file system")))
+            }
+            let differences = FileMetadataFingerprint.differences(
+                source: try .read(source, includeContent: true),
+                destination: try .read(destination, includeContent: true),
+                resolution: resolution)
+            for difference in differences {
+                log("\(path): \(difference.field) differs: \(difference.before) → \(difference.after)")
+            }
+            return .success(differences.first.map { "\(path): \($0.field) differs: \($0.before) → \($0.after)" })
+        } catch {
+            return .failure(Stop(outcome: .failed(
+                "Couldn't compare \(path) with the drive: \(error.localizedDescription)")))
         }
-        guard errno == ENOENT else { return .failure(lastError()) }
-        if mkdir(url.path, 0o777) == 0 { return .success(true) }
-        if errno == EEXIST, lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR { return .success(false) }
-        return .failure(lastError())
-    }
-
-    /// Unlinks a file or symlink (never a folder); a missing entry is fine. A copy can carry the source's
-    /// "Locked" flag, so clear flags and retry once if the first attempt isn't permitted.
-    static func removeFile(_ url: URL) -> POSIXError? {
-        if unlink(url.path) == 0 || errno == ENOENT { return nil }
-        if errno == EPERM, lchflags(url.path, 0) == 0, unlink(url.path) == 0 { return nil }
-        return lastError()
-    }
-
-    /// Renames `source` to `destination`, failing with EEXIST rather than replacing anything there.
-    static func renameWithoutReplacing(from source: URL, to destination: URL) -> POSIXError? {
-        if renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 { return nil }
-        guard errno == ENOTSUP || errno == EOPNOTSUPP else { return lastError() }
-        return renameReservingName(from: source, to: destination)
-    }
-
-    /// For volumes without RENAME_EXCL (exFAT via FSKit): claim the name with an exclusive create, which
-    /// fails if anything (even a dangling symlink) is there, then let the copy replace that empty placeholder.
-    static func renameReservingName(from source: URL, to destination: URL) -> POSIXError? {
-        let placeholder = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard placeholder >= 0 else { return lastError() }
-        close(placeholder)
-        if rename(source.path, destination.path) == 0 { return nil }
-        let error = lastError()
-        unlink(destination.path)
-        return error
-    }
-
-    /// Gives `url` the source's flags, keeping its own `UF_COMPRESSED` (a storage detail, not metadata).
-    static func copyFlags(_ sourceFlags: UInt32, to url: URL) -> POSIXError? {
-        var info = stat()
-        guard lstat(url.path, &info) == 0 else { return lastError() }
-        let compressed = UInt32(UF_COMPRESSED)
-        let wanted = (sourceFlags & ~compressed) | (info.st_flags & compressed)
-        if wanted == info.st_flags { return nil }
-        return lchflags(url.path, wanted) == 0 ? nil : lastError()
-    }
-
-    static func setXattr(_ name: String, _ value: Data, on url: URL) -> POSIXError? {
-        let result = value.withUnsafeBytes { bytes in
-            setxattr(url.path, name, bytes.baseAddress, bytes.count, 0, XATTR_NOFOLLOW)
-        }
-        return result == 0 ? nil : lastError()
-    }
-
-    static func removeXattr(_ name: String, from url: URL) -> POSIXError? {
-        removexattr(url.path, name, XATTR_NOFOLLOW) == 0 ? nil : lastError()
-    }
-
-    /// Sets the exact birth and modification times in one call, so the kernel can't pull one toward the other.
-    static func setDates(created: Int64, modified: Int64, on url: URL) -> POSIXError? {
-        var list = attrlist()
-        list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
-        list.commonattr = attrgroup_t(ATTR_CMN_CRTIME | ATTR_CMN_MODTIME)
-        var buffer = (timespec(nanoseconds: created), timespec(nanoseconds: modified))
-        let result = setattrlist(url.path, &list, &buffer, MemoryLayout<timespec>.size * 2, UInt32(FSOPT_NOFOLLOW))
-        return result == 0 ? nil : lastError()
-    }
-
-    static func isSameFile(_ lhs: URL, _ rhs: URL) throws -> Bool {
-        var left = stat()
-        var right = stat()
-        guard lstat(lhs.path, &left) == 0, lstat(rhs.path, &right) == 0 else { throw lastError() }
-        return left.st_dev == right.st_dev && left.st_ino == right.st_ino
-    }
-}
-
-private extension timespec {
-    /// Floor division keeps `tv_nsec` in 0..<1e9 for dates before 1970.
-    init(nanoseconds: Int64) {
-        var seconds = nanoseconds / 1_000_000_000
-        var remainder = nanoseconds % 1_000_000_000
-        if remainder < 0 {
-            remainder += 1_000_000_000
-            seconds -= 1
-        }
-        self.init(tv_sec: Int(seconds), tv_nsec: Int(remainder))
     }
 }

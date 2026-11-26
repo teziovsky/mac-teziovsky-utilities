@@ -180,7 +180,7 @@ enum FileDateRepairScanner {
             ) {
             case .move(let item):
                 organizationCandidate = item
-            case .unchanged:
+            case .unchanged, .kept:
                 isAlreadyOrganized = true
             case .outsideScannedFolder(let year):
                 outsideYear = year

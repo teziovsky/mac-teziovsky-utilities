@@ -100,7 +100,8 @@ enum DroneFinalizePlanBuilder {
     static func makePlan(
         exportFiles files: [String],
         config: DroneFinalizeConfig,
-        isMedia: (String) -> Bool
+        isMedia: (String) -> Bool,
+        isVideo: (String) -> Bool = { MediaFileClassifier.isVideo($0) }
     ) -> DroneFinalizePlan {
         let suffix = config.normalizedSuffix
         let visible = files.filter { !$0.hasPrefix(".") && !($0 as NSString).lastPathComponent.hasPrefix(".") }
@@ -108,8 +109,9 @@ enum DroneFinalizePlanBuilder {
         let compressed = visible.filter { hasCompressedSuffix(($0 as NSString).lastPathComponent, suffix: suffix) }
         let compressedSet = Set(compressed)
 
+        // Only media can be an original: sidecars (.LRF, .SRT, .XML…) share base names with clips.
         var candidatesByDirectoryAndBase: [String: [String]] = [:]
-        for file in visible where !compressedSet.contains(file) {
+        for file in visible where !compressedSet.contains(file) && isMedia((file as NSString).lastPathComponent) {
             let directory = directoryPrefix(of: file)
             let base = baseName((file as NSString).lastPathComponent).lowercased()
             let key = "\(directory)|\(base)"
@@ -130,9 +132,15 @@ enum DroneFinalizePlanBuilder {
             let finalKey = finalRelativePath.lowercased()
 
             let lookupKey = "\(directory)|\(strippedBase.lowercased())"
+            let compressedIsVideo = isVideo(fileName)
+            // Prefer an original of the same kind (video for a compressed video), then by name.
             let source = (candidatesByDirectoryAndBase[lookupKey] ?? [])
                 .filter { !consumedSources.contains($0) }
-                .sorted()
+                .sorted {
+                    let lhsMatches = isVideo(($0 as NSString).lastPathComponent) == compressedIsVideo
+                    let rhsMatches = isVideo(($1 as NSString).lastPathComponent) == compressedIsVideo
+                    return lhsMatches != rhsMatches ? lhsMatches : $0 < $1
+                }
                 .first
 
             let collidesWithExisting = visible.contains {
@@ -213,10 +221,10 @@ enum DroneToolPaths {
         if !trimmed.isEmpty, FileManager.default.isExecutableFile(atPath: trimmed) {
             return URL(fileURLWithPath: trimmed)
         }
+        // HandBrake.app does not bundle the CLI; it comes from Homebrew or the separate download.
         let candidates = [
             "/opt/homebrew/bin/HandBrakeCLI",
-            "/usr/local/bin/HandBrakeCLI",
-            "/Applications/HandBrake.app/Contents/MacOS/HandBrakeCLI"
+            "/usr/local/bin/HandBrakeCLI"
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }.map { URL(fileURLWithPath: $0) }
     }

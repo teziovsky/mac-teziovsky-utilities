@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Photos
 
@@ -56,6 +57,72 @@ enum PhotoAssetExporter {
         return PhotoExportResourcePlan(primary: primary, companions: companions)
     }
 
+    private static let assetIdentifierAttribute = "com.teziovsky.utilities.photos-asset-id"
+
+    /// Tags an exported file with its Photos asset so a re-run recognises it instead of writing
+    /// a numbered duplicate (e.g. after the export succeeded but moving the asset failed).
+    static func markExported(_ url: URL, assetIdentifier: String) {
+        let value = Array(assetIdentifier.utf8)
+        url.path.withCString { path in
+            assetIdentifierAttribute.withCString { name in
+                value.withUnsafeBytes { bytes in
+                    _ = setxattr(path, name, bytes.baseAddress, bytes.count, 0, 0)
+                }
+            }
+        }
+    }
+
+    /// An earlier export of the asset among `filename`, `filename (1)`, … in `directory`.
+    static func existingExport(ofAssetIdentifier identifier: String, filename: String, in directory: URL) -> URL? {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            if exportedAssetIdentifier(of: candidate) == identifier {
+                return candidate
+            }
+            let numbered = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
+            candidate = directory.appendingPathComponent(numbered)
+            counter += 1
+        }
+        return nil
+    }
+
+    private static func exportedAssetIdentifier(of url: URL) -> String? {
+        url.path.withCString { path in
+            assetIdentifierAttribute.withCString { name -> String? in
+                let size = getxattr(path, name, nil, 0, 0, 0)
+                guard size > 0 else { return nil }
+                var buffer = [UInt8](repeating: 0, count: size)
+                guard getxattr(path, name, &buffer, size, 0, 0) == size else { return nil }
+                return String(bytes: buffer, encoding: .utf8)
+            }
+        }
+    }
+
+    /// iCloud download failures, recognised by error domain/code (localized messages differ
+    /// per system language), including errors wrapped as `NSUnderlyingErrorKey`.
+    static func isICloudDownloadFailure(_ error: NSError) -> Bool {
+        if error.domain == PHPhotosErrorDomain {
+            let networkCodes: Set<Int> = [
+                PHPhotosError.networkAccessRequired.rawValue,
+                PHPhotosError.networkError.rawValue
+            ]
+            if networkCodes.contains(error.code) { return true }
+        }
+        if error.domain == NSURLErrorDomain || error.domain.contains("CloudPhotoLibrary")
+            || error.domain.contains("CloudKit") {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isICloudDownloadFailure(underlying)
+        }
+        // Last resort for unknown English-only wrappers.
+        let message = error.localizedDescription.lowercased()
+        return message.contains("icloud") || message.contains("not downloaded")
+    }
+
     /// Companions share the primary file's (possibly collision-renamed) base name so Photos
     /// and other tools can re-pair them, e.g. `IMG_0001 (1).HEIC` + `IMG_0001 (1).MOV`.
     static func companionFilename(primaryDestination: URL, companionOriginalFilename: String) -> String {
@@ -92,6 +159,7 @@ enum PhotoAssetExporter {
         do {
             written.append(destination)
             try await writeData(for: primary, to: destination)
+            markExported(destination, assetIdentifier: asset.localIdentifier)
             try finalizeExportedFile(
                 at: destination,
                 info: ExportedResourceInfo(creationDate: asset.creationDate, modificationDate: asset.modificationDate)
@@ -165,8 +233,7 @@ enum PhotoAssetExporter {
 
             PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
                 if let error {
-                    let message = (error as NSError).localizedDescription.lowercased()
-                    if message.contains("cloud") || message.contains("not downloaded") {
+                    if isICloudDownloadFailure(error as NSError) {
                         continuation.resume(throwing: PhotoAssetExportError.iCloudOnly)
                         return
                     }

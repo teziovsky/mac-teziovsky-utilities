@@ -310,7 +310,9 @@ final class AppState: ObservableObject {
 
     var canOrganizeSelectedAlbum: Bool {
         guard let album = selectedAlbum else { return false }
-        return photosService.canAccessLibrary && !isAlbumOmittedFromOrganize(album)
+        return photosService.canAccessLibrary
+            && !isAlbumOmittedFromOrganize(album)
+            && PhotosService.destinationAlbumTitle(forSourceAlbumNamed: album.name) != nil
     }
 
     /// Shows the export folder picker, then exports and organizes into the chosen folder.
@@ -349,7 +351,9 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func prepareOrganize() -> Bool {
-        guard let album = selectedAlbum, !isAlbumOmittedFromOrganize(album) else { return false }
+        guard canOrganizeSelectedAlbum, let album = selectedAlbum, !isAlbumOmittedFromOrganize(album) else {
+            return false
+        }
         guard photosService.canAccessLibrary else { return false }
         guard !mediaItems.isEmpty else { return false }
         guard !organizeExporter.isRunning else { return false }

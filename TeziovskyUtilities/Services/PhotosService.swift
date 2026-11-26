@@ -37,7 +37,8 @@ final class PhotosService: NSObject, ObservableObject {
     @Published var errorMessage: String?
 
     private var changeObserverRegistered = false
-    private var deferAlbumReloadFromLibraryChanges = false
+    /// Counted so overlapping Organize runs (cancel + restart) cannot end each other's deferral.
+    private var albumReloadDeferrals = 0
 
     override init() {
         super.init()
@@ -86,11 +87,12 @@ final class PhotosService: NSObject, ObservableObject {
 
     /// Coalesces `photoLibraryDidChange` reloads while Organize is moving assets (one refresh at `endDeferringAlbumReloadFromLibraryChanges`).
     func beginDeferringAlbumReloadFromLibraryChanges() {
-        deferAlbumReloadFromLibraryChanges = true
+        albumReloadDeferrals += 1
     }
 
     func endDeferringAlbumReloadFromLibraryChanges() async {
-        deferAlbumReloadFromLibraryChanges = false
+        albumReloadDeferrals = max(albumReloadDeferrals - 1, 0)
+        guard albumReloadDeferrals == 0 else { return }
         await reloadAlbums()
     }
 
@@ -121,9 +123,15 @@ final class PhotosService: NSObject, ObservableObject {
         return cache
     }
 
-    static func destinationAlbumTitle(forSourceAlbumNamed sourceName: String) -> String {
-        let suffix = AppSettings.excludedAlbumSuffix.trimmingCharacters(in: .whitespacesAndNewlines)
-        return sourceName + suffix
+    static func destinationAlbumTitle(forSourceAlbumNamed sourceName: String) -> String? {
+        destinationAlbumTitle(forSourceAlbumNamed: sourceName, suffix: AppSettings.excludedAlbumSuffix)
+    }
+
+    /// The "done" album name. nil for a blank suffix: it would equal the source album, so every
+    /// item would be exported and then fail to move.
+    nonisolated static func destinationAlbumTitle(forSourceAlbumNamed sourceName: String, suffix: String) -> String? {
+        let trimmed = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : sourceName + trimmed
     }
 
     func moveAsset(
@@ -350,7 +358,7 @@ extension PhotosService: PHPhotoLibraryChangeObserver {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in
             guard canAccessLibrary else { return }
-            guard !deferAlbumReloadFromLibraryChanges else { return }
+            guard albumReloadDeferrals == 0 else { return }
             guard !isLoadingAlbums else { return }
             await reloadAlbums()
         }

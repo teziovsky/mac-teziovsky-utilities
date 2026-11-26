@@ -196,7 +196,13 @@ struct LocalPhotosModeView: View {
                 if !service.items.isEmpty {
                     Divider()
                     chunkControls
-                    LocalMediaFilteredList(items: service.items, path: \.relativePath, filter: filter) { item in
+                    LocalMediaTreeList(
+                        service: service,
+                        items: service.items,
+                        path: \.relativePath,
+                        filter: filter,
+                        step: .repair
+                    ) { item in
                         let didFail = service.attemptedIDs.contains(item.id)
                             && !service.repairedIDs.contains(item.id)
                         LocalMediaSelectableRow(
@@ -402,10 +408,12 @@ private struct LocalMediaConversionPreviewCard: View {
                 navigation
                 if !service.conversionItems.isEmpty {
                     Divider()
-                    LocalMediaFilteredList(
+                    LocalMediaTreeList(
+                        service: service,
                         items: service.conversionItems,
                         path: \.sourceRelativePath,
-                        filter: filter
+                        filter: filter,
+                        step: .conversion
                     ) { item in
                         LocalMediaSelectableRow(
                             service: service,
@@ -561,10 +569,12 @@ private struct LocalMediaOrganizationPreviewCard: View {
                 navigation
                 if !service.organizationItems.isEmpty {
                     Divider()
-                    LocalMediaFilteredList(
+                    LocalMediaTreeList(
+                        service: service,
                         items: service.organizationItems,
                         path: \.sourceRelativePath,
-                        filter: filter
+                        filter: filter,
+                        step: .organization
                     ) { item in
                         LocalMediaSelectableRow(
                             service: service,

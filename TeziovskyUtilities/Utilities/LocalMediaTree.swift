@@ -110,3 +110,40 @@ enum LocalMediaTree {
         }
     }
 }
+
+extension LocalMediaTree {
+    /// The rows to render while only `fileLimit` file rows are shown; folder headers don't
+    /// count. `isTruncated` means some file rows are behind "Show all".
+    static func limitedRows(
+        _ rows: [LocalMediaTreeRow],
+        fileLimit: Int
+    ) -> (rows: [LocalMediaTreeRow], isTruncated: Bool) {
+        let fileRowCount = rows.filter { if case .file = $0.kind { true } else { false } }.count
+        guard fileRowCount > fileLimit else { return (rows, false) }
+        var visible: [LocalMediaTreeRow] = []
+        var emittedFiles = 0
+        for row in rows {
+            guard emittedFiles < fileLimit else { break }
+            visible.append(row)
+            if case .file = row.kind { emittedFiles += 1 }
+        }
+        return (visible, true)
+    }
+}
+
+extension LocalMediaFolderSelection {
+    /// Clicking a fully included folder excludes it; a partly or fully excluded one is included.
+    var excludesOnClick: Bool { self == .all }
+
+    var checkboxSymbol: String {
+        switch self {
+        case .all: "checkmark.square.fill"
+        case .some: "minus.square.fill"
+        case .none: "square"
+        }
+    }
+
+    var checkboxHelp: String {
+        excludesOnClick ? "Exclude all files in this folder" : "Include all files in this folder"
+    }
+}

@@ -13,13 +13,21 @@ actor ThumbnailLoader {
         cache.totalCostLimit = 256 * 1024 * 1024
         return cache
     }()
-    private let thumbnailSize = CGSize(width: 400, height: 400)
     private let requestTimeoutSeconds: UInt64 = 12
     private let maxDiskCacheBytes: Int64 = 500 * 1024 * 1024
     /// The disk cache is trimmed after this much new data, not after every single thumbnail.
     private let pruneEveryBytes: Int64 = 32 * 1024 * 1024
     private var bytesWrittenSincePrune: Int64 = .max
     private let customCacheRoot: URL?
+
+    /// Thumbnail sizes in pixels. Each cell requests the smallest bucket covering it on the
+    /// current display, so large cells on Retina stay sharp and small cells stay cheap.
+    nonisolated static let pixelBuckets = [256, 512, 1024, 2048]
+
+    nonisolated static func pixelBucket(forPoints points: CGFloat, scale: CGFloat) -> Int {
+        let needed = Int((points * max(scale, 1)).rounded(.up))
+        return pixelBuckets.first { $0 >= needed } ?? pixelBuckets[pixelBuckets.count - 1]
+    }
 
     init(cacheRoot: URL? = nil) {
         customCacheRoot = cacheRoot
@@ -31,28 +39,29 @@ actor ThumbnailLoader {
         return appSupport.appendingPathComponent("TeziovskyUtilities/Thumbnails", isDirectory: true)
     }
 
-    func cachedImage(for itemID: String) -> NSImage? {
-        memoryCache.object(forKey: itemID as NSString)
+    func cachedImage(for itemID: String, pixelSize: Int = 512) -> NSImage? {
+        memoryCache.object(forKey: Self.cacheKey(itemID, pixelSize) as NSString)
     }
 
-    func thumbnail(for item: MediaItem, album: PhotoAlbum, asset: PHAsset?) async -> NSImage? {
-        if let cached = memoryCache.object(forKey: item.id as NSString) {
+    func thumbnail(for item: MediaItem, album: PhotoAlbum, asset: PHAsset?, pixelSize: Int = 512) async -> NSImage? {
+        let key = Self.cacheKey(item.id, pixelSize)
+        if let cached = memoryCache.object(forKey: key as NSString) {
             return cached
         }
 
-        let diskPath = diskCacheURL(album: album, itemID: item.id)
+        let diskPath = diskCacheURL(album: album, itemID: item.id, pixelSize: pixelSize)
         if FileManager.default.fileExists(atPath: diskPath.path),
            let image = NSImage(contentsOf: diskPath) {
-            remember(image, for: item.id)
+            remember(image, for: key)
             return image
         }
 
         guard let asset else { return nil }
 
-        let image = await requestImage(for: asset)
+        let image = await requestImage(for: asset, pixelSize: pixelSize)
         guard let image, !Task.isCancelled else { return image }
 
-        remember(image, for: item.id)
+        remember(image, for: key)
         if let written = try? saveToDisk(image: image, url: diskPath) {
             bytesWrittenSincePrune = bytesWrittenSincePrune == .max ? written : bytesWrittenSincePrune + written
         }
@@ -79,7 +88,11 @@ actor ThumbnailLoader {
         memoryCache.setObject(image, forKey: itemID as NSString, cost: cost)
     }
 
-    private func requestImage(for asset: PHAsset) async -> NSImage? {
+    private static func cacheKey(_ itemID: String, _ pixelSize: Int) -> String {
+        "\(itemID)@\(pixelSize)"
+    }
+
+    private func requestImage(for asset: PHAsset, pixelSize: Int) async -> NSImage? {
         let request = ImageRequest(imageManager: imageManager)
         let timeout = requestTimeoutSeconds
         return await withTaskCancellationHandler {
@@ -93,7 +106,7 @@ actor ThumbnailLoader {
 
                 let requestID = imageManager.requestImage(
                     for: asset,
-                    targetSize: thumbnailSize,
+                    targetSize: CGSize(width: pixelSize, height: pixelSize),
                     contentMode: .aspectFit,
                     options: options
                 ) { image, info in
@@ -112,12 +125,12 @@ actor ThumbnailLoader {
         }
     }
 
-    func diskCacheURL(album: PhotoAlbum, itemID: String) -> URL {
+    func diskCacheURL(album: PhotoAlbum, itemID: String, pixelSize: Int = 512) -> URL {
         let albumHash = SHA256.hash(data: Data(album.id.utf8)).compactMap { String(format: "%02x", $0) }.joined().prefix(16)
         let safeItemID = itemID.replacingOccurrences(of: "/", with: "_")
         let dir = cacheRoot.appendingPathComponent(String(albumHash), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("\(safeItemID).jpg")
+        return dir.appendingPathComponent("\(safeItemID)@\(pixelSize).jpg")
     }
 
     private func pruneDiskCacheIfNeeded() async {

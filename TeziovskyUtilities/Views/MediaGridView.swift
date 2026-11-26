@@ -104,6 +104,12 @@ private struct MediaThumbnailCell: View {
     @State private var image: NSImage?
     @State private var loadFailed = false
     @State private var loadGeneration = 0
+    @Environment(\.displayScale) private var displayScale
+
+    /// Pixel size requested from PhotoKit: sharp at the current cell size on this display.
+    private var pixelSize: Int {
+        ThumbnailLoader.pixelBucket(forPoints: cellSize, scale: displayScale)
+    }
 
     var body: some View {
         ZStack {
@@ -142,7 +148,8 @@ private struct MediaThumbnailCell: View {
         .help(tooltip)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .task(id: item.id) {
+        .task(id: "\(item.id)@\(pixelSize)") {
+            // A bigger bucket keeps showing the current image until the sharper one arrives.
             await loadThumbnail()
         }
     }
@@ -189,15 +196,18 @@ private struct MediaThumbnailCell: View {
     private func loadThumbnail(generation: Int? = nil) async {
         let activeGeneration = generation ?? loadGeneration
         loadFailed = false
-        if let cached = await ThumbnailLoader.shared.cachedImage(for: item.id) {
+        let size = pixelSize
+        if let cached = await ThumbnailLoader.shared.cachedImage(for: item.id, pixelSize: size) {
             guard activeGeneration == loadGeneration else { return }
             image = cached
             return
         }
-        let loaded = await ThumbnailLoader.shared.thumbnail(for: item, album: album, asset: asset)
+        let loaded = await ThumbnailLoader.shared.thumbnail(for: item, album: album, asset: asset, pixelSize: size)
         guard activeGeneration == loadGeneration else { return }
-        image = loaded
-        loadFailed = loaded == nil
+        if let loaded {
+            image = loaded
+        }
+        loadFailed = loaded == nil && image == nil
     }
 
     private var cellBackground: Color {

@@ -20,6 +20,8 @@ struct RootView: View {
                     DroneModeView(workflow: appState.droneWorkflow)
                 case .localPhotos:
                     LocalPhotosModeView(service: appState.localPhotosService)
+                case .externalDrive:
+                    ExternalDriveModeView(service: appState.externalDriveService)
                 }
             }
         }

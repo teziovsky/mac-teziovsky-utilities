@@ -270,6 +270,13 @@ final class ExternalDriveTransferService: ObservableObject {
         progress = ExternalDriveProgress()
         checkProgress = FileDateRepairProgress()
     }
+
+    #if DEBUG
+    /// Test-only: puts the service in a running state for command tests.
+    func setRunningForTesting(transferring: Bool = false, checking: Bool = false) {
+        (isTransferring, isChecking, runKind) = (transferring, checking, transferring ? .move : nil)
+    }
+    #endif
 }
 
 // MARK: - Runs

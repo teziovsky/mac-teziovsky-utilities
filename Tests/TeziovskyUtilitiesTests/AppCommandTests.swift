@@ -23,10 +23,69 @@ final class AppCommandDecisionTests: XCTestCase {
 
     func testHomeWorksFromEveryModeWhenIdle() {
         let state = makeState()
-        for route in [AppRoute.photos, .localPhotos, .drone] {
+        for route in [AppRoute.photos, .localPhotos, .drone, .externalDrive] {
             state.route = route
             XCTAssertEqual(state.decision(for: .home), .perform, "\(route)")
         }
+    }
+
+    func testLocalMediaTitleIsRenamed() {
+        XCTAssertEqual(AppBranding.localPhotosModeTitle, "Organize Local Media")
+        XCTAssertEqual(AppBranding.externalDriveModeTitle, "Move to External Drive")
+    }
+
+    func testExternalDriveCommandsExplainThemselvesWhileMoving() {
+        let state = makeState()
+        state.route = .externalDrive
+        state.externalDriveService.setRunningForTesting(transferring: true)
+        for command in [AppCommand.home, .back, .escape, .openFolder, .refresh] {
+            assertNotice(state.decision(for: command), contains: "Use Cancel")
+        }
+        state.externalDriveService.setRunningForTesting(transferring: false)
+        state.externalDriveService.setRunningForTesting(checking: true)
+        for command in [AppCommand.home, .back, .escape, .openFolder, .refresh] {
+            assertNotice(state.decision(for: command), contains: "Use Cancel")
+        }
+    }
+
+    func testExternalDriveRefreshAndRevealNeedASource() {
+        // "No source" means the service has none (nothing checked or chosen yet).
+        let state = makeState()
+        state.route = .externalDrive
+        XCTAssertNil(state.externalDriveService.sourceURL)
+        assertNotice(state.decision(for: .refresh), contains: "Choose the source folder first (⌘O)")
+        assertNotice(state.decision(for: .reveal), contains: "Choose the source folder first (⌘O)")
+        state.externalDriveService.useSource(root)
+        XCTAssertEqual(state.decision(for: .refresh), .perform)
+        XCTAssertEqual(state.decision(for: .reveal), .perform)
+        state.externalDriveService.reset()
+    }
+
+    func testExternalDriveOpenFolderAndBackPerformWhenIdle() {
+        let state = makeState()
+        state.route = .externalDrive
+        XCTAssertEqual(state.decision(for: .openFolder), .perform)
+        XCTAssertEqual(state.decision(for: .back), .perform)
+        XCTAssertEqual(state.decision(for: .escape), .perform)
+        XCTAssertEqual(state.openFolderTitle, "Choose Source Folder…")
+        XCTAssertEqual(state.refreshTitle, "Check Again")
+    }
+
+    func testOpenSourceInLocalMediaIsANoOpWithoutASource() {
+        let state = makeState()
+        state.route = .externalDrive
+        state.openSourceInLocalMedia()
+        XCTAssertEqual(state.route, .externalDrive)
+    }
+
+    func testLeavingExternalDriveHomeResetsTheService() {
+        let state = makeState()
+        state.route = .externalDrive
+        state.externalDriveService.useSource(root)
+        state.run(.home)
+        XCTAssertEqual(state.route, .home)
+        XCTAssertEqual(state.externalDriveService.step, .review)
+        XCTAssertFalse(state.externalDriveService.isRunning)
     }
 
     func testCommandsAreBlockedWhileADialogIsOpen() {

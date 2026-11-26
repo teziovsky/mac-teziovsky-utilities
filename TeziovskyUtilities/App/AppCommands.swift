@@ -101,6 +101,9 @@ extension AppState {
         case .localPhotos:
             guard let activity = localPhotosService.activityTitle else { return nil }
             return "\(activity) is in progress. Use Cancel, or wait until it finishes."
+        case .externalDrive:
+            guard let activity = externalDriveService.activityTitle else { return nil }
+            return "\(activity) is in progress. Use Cancel, or wait until it finishes."
         case .drone:
             if droneWorkflow.finalizer.isRunning {
                 return "A finalize step is changing files and can't be interrupted. Wait until it finishes."
@@ -124,6 +127,8 @@ extension AppState {
                 return .perform
             }
             return .notice("This is the first step. Press ⇧⌘H to leave — the scan results will be discarded.")
+        case .externalDrive:
+            return .perform
         case .drone:
             if droneWorkflow.canGoBack || droneWorkflow.phase == .validateLayout {
                 return .perform
@@ -147,7 +152,7 @@ extension AppState {
                 "Export iCloud Photos works on your Photos library — you choose the export folder "
                     + "when you organize an album (⌘E)."
             )
-        case .localPhotos, .drone:
+        case .localPhotos, .drone, .externalDrive:
             return busyReason().map(CommandDecision.notice) ?? .perform
         }
     }
@@ -163,6 +168,8 @@ extension AppState {
             return .perform
         case .localPhotos:
             return localPhotosService.directory == nil ? .notice("Choose a media folder first (⌘O).") : .perform
+        case .externalDrive:
+            return externalDriveSourceNotice() ?? .perform
         case .drone:
             guard droneWorkflow.hasProject else { return .notice("Choose a project folder first (⌘O).") }
             return droneWorkflow.canRefreshCurrentStep ? .perform : .notice("There is nothing to refresh in this step.")
@@ -179,6 +186,8 @@ extension AppState {
                 : .perform
         case .localPhotos:
             return localPhotosService.directory == nil ? .notice("Choose a media folder first (⌘O).") : .perform
+        case .externalDrive:
+            return externalDriveSourceNotice() ?? .perform
         case .drone:
             return droneWorkflow.hasProject ? .perform : .notice("Choose a project folder first (⌘O).")
         }
@@ -259,7 +268,7 @@ extension AppState {
 
 extension AppState {
     func run(_ command: AppCommand) {
-        // Esc in a text field (e.g. the Local Photos filter) first leaves the field, like in
+        // Esc in a text field (e.g. the Local Media filter) first leaves the field, like in
         // Finder; only the next Esc navigates.
         if command == .escape, endTextEditingInMainWindow() {
             return
@@ -319,6 +328,7 @@ extension AppState {
     var refreshTitle: String {
         switch route {
         case .localPhotos: return "Rescan Folder"
+        case .externalDrive: return "Check Again"
         case .drone: return "Refresh Step"
         default: return "Refresh Albums"
         }
@@ -327,6 +337,7 @@ extension AppState {
     var openFolderTitle: String {
         switch route {
         case .drone: return "Open Project Folder…"
+        case .externalDrive: return "Choose Source Folder…"
         default: return "Open Media Folder…"
         }
     }
@@ -354,6 +365,7 @@ extension AppState {
         switch route {
         case .drone: droneWorkflow.reset()
         case .localPhotos: localPhotosService.reset()
+        case .externalDrive: externalDriveService.reset()
         case .home, .photos: break
         }
         if QuickLookHelper.isPanelVisible {
@@ -376,6 +388,10 @@ extension AppState {
             if let previous = localPhotosService.workflowStep.previous {
                 localPhotosService.workflowStep = previous
             } else {
+                leaveCurrentMode()
+            }
+        case .externalDrive:
+            if !externalDriveService.goBack() {
                 leaveCurrentMode()
             }
         case .drone:
@@ -403,6 +419,8 @@ extension AppState {
             panel.prompt = "Scan"
             guard panel.runModal() == .OK, let url = panel.url else { return }
             localPhotosService.scan(directory: url)
+        case .externalDrive:
+            chooseExternalDriveSource(using: panel)
         case .home, .photos:
             break
         }
@@ -416,6 +434,8 @@ extension AppState {
             if let directory = localPhotosService.directory {
                 localPhotosService.scan(directory: directory)
             }
+        case .externalDrive:
+            externalDriveService.check()
         case .drone:
             droneWorkflow.refreshCurrentStep()
         case .home:
@@ -428,6 +448,7 @@ extension AppState {
         switch route {
         case .photos: folder = AppSettings.resolveExportDirectory()
         case .localPhotos: folder = localPhotosService.directory
+        case .externalDrive: folder = externalDriveService.sourceURL
         case .drone: folder = droneWorkflow.projectDirectoryPath.map { URL(fileURLWithPath: $0) }
         case .home: folder = nil
         }

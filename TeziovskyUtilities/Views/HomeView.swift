@@ -4,6 +4,7 @@ import SwiftUI
 private enum HomeCardKind: Hashable {
     case photos
     case localPhotos
+    case externalDrive
     case drone
 }
 
@@ -46,6 +47,18 @@ struct HomeView: View {
                     focus: $focusedCard
                 ) {
                     appState.enterLocalPhotosMode()
+                }
+                .prefersDefaultFocus(false, in: homeFocusScope)
+
+                HomeModeCard(
+                    kind: .externalDrive,
+                    title: AppBranding.externalDriveModeTitle,
+                    subtitle: AppBranding.externalDriveModeSubtitle,
+                    systemImage: AppBranding.externalDriveModeIcon,
+                    acceptsFocus: cardsAcceptFocus,
+                    focus: $focusedCard
+                ) {
+                    appState.enterExternalDriveMode()
                 }
                 .prefersDefaultFocus(false, in: homeFocusScope)
 

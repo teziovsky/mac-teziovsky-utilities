@@ -25,7 +25,12 @@ enum AppBranding {
     static let droneModeSubtitle = "Validate project, compress exports, finalize delivery files."
     static let droneModeIcon = "airplane"
 
-    static let localPhotosModeTitle = "Organize Local Photos"
+    static let localPhotosModeTitle = "Organize Local Media"
     static let localPhotosModeSubtitle = "Convert legacy media, repair dates, and organize files into year folders."
     static let localPhotosModeIcon = "folder.badge.gearshape"
+
+    static let externalDriveModeTitle = "Move to External Drive"
+    static let externalDriveModeSubtitle =
+        "Check organized photos and videos, then move them to your archive drive with verified metadata."
+    static let externalDriveModeIcon = "externaldrive.badge.checkmark"
 }

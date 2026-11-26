@@ -7,6 +7,7 @@
 
 /* Begin PBXBuildFile section */
 		9C795D2769CD4500B193EF0C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BF803B324DB4B12919B1402 /* AppState.swift */; };
+		A0010000000000000000F0A2 /* AppCommands+ExternalDrive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A2 /* AppCommands+ExternalDrive.swift */; };
 		0231597251DC4E3B9B4ACF26 /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A88A23AAD35C4F41857D6B37 /* AppCommands.swift */; };
 		13420944E3E4445E8A034E05 /* TeziovskyUtilitiesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */; };
 		166D2A828251492495D9CF73 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C7A00AAFB3B4075B2D47ED5 /* MediaItem.swift */; };
@@ -64,6 +65,7 @@
 		A00100000000000000000A02 /* ExternalDriveClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000A02 /* ExternalDriveClassifier.swift */; };
 		A00200000000000000000001 /* FileDateRepairModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000001 /* FileDateRepairModels.swift */; };
 		A00200000000000000000002 /* FileDateRepairService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000002 /* FileDateRepairService.swift */; };
+		A0010000000000000000F0A1 /* ExternalDriveModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F0A1 /* ExternalDriveModeView.swift */; };
 		A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000003 /* FileDateRepairModeView.swift */; };
 		873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */; };
 		A00300000000000000000001 /* LocalMediaConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000001 /* LocalMediaConversion.swift */; };
@@ -76,6 +78,7 @@
 		8CFB453D98264CF289BB3BBF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CCEC6AF34D2A457CA48F3ED4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		7BF803B324DB4B12919B1402 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B0010000000000000000F0A2 /* AppCommands+ExternalDrive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppCommands+ExternalDrive.swift"; sourceTree = "<group>"; };
 		A88A23AAD35C4F41857D6B37 /* AppCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommands.swift; sourceTree = "<group>"; };
 		4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeziovskyUtilitiesApp.swift; sourceTree = "<group>"; };
 		6C7A00AAFB3B4075B2D47ED5 /* MediaItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItem.swift; sourceTree = "<group>"; };
@@ -133,6 +136,7 @@
 		B00100000000000000000A02 /* ExternalDriveClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveClassifier.swift; sourceTree = "<group>"; };
 		B00200000000000000000001 /* FileDateRepairModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModels.swift; sourceTree = "<group>"; };
 		B00200000000000000000002 /* FileDateRepairService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairService.swift; sourceTree = "<group>"; };
+		B0010000000000000000F0A1 /* ExternalDriveModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveModeView.swift; sourceTree = "<group>"; };
 		B00200000000000000000003 /* FileDateRepairModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModeView.swift; sourceTree = "<group>"; };
 		7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaListComponents.swift; sourceTree = "<group>"; };
 		B00300000000000000000001 /* LocalMediaConversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaConversion.swift; sourceTree = "<group>"; };
@@ -164,6 +168,7 @@
 			children = (
 				7BF803B324DB4B12919B1402 /* AppState.swift */,
 				A88A23AAD35C4F41857D6B37 /* AppCommands.swift */,
+				B0010000000000000000F0A2 /* AppCommands+ExternalDrive.swift */,
 				4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */,
 			);
 			path = App;
@@ -250,6 +255,7 @@
 				B0010000000000000000000A /* PhotosModeView.swift */,
 				B0010000000000000000000B /* DroneModeView.swift */,
 				B00100000000000000000017 /* DroneFinalizeViews.swift */,
+				B0010000000000000000F0A1 /* ExternalDriveModeView.swift */,
 				B00200000000000000000003 /* FileDateRepairModeView.swift */,
 				7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */,
 			);
@@ -349,6 +355,7 @@
 			files = (
 				9C795D2769CD4500B193EF0C /* AppState.swift in Sources */,
 				0231597251DC4E3B9B4ACF26 /* AppCommands.swift in Sources */,
+				A0010000000000000000F0A2 /* AppCommands+ExternalDrive.swift in Sources */,
 				13420944E3E4445E8A034E05 /* TeziovskyUtilitiesApp.swift in Sources */,
 				166D2A828251492495D9CF73 /* MediaItem.swift in Sources */,
 				16B4F10D882242B684686880 /* OrganizeProgress.swift in Sources */,
@@ -405,6 +412,7 @@
 				A00100000000000000000A03 /* ExternalDriveLocations.swift in Sources */,
 				A00200000000000000000001 /* FileDateRepairModels.swift in Sources */,
 				A00200000000000000000002 /* FileDateRepairService.swift in Sources */,
+				A0010000000000000000F0A1 /* ExternalDriveModeView.swift in Sources */,
 				A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */,
 				873AF8C6EFB2412AB79BA78D /* LocalMediaListComponents.swift in Sources */,
 				A00300000000000000000001 /* LocalMediaConversion.swift in Sources */,

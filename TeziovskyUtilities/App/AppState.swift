@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     let organizeExporter = OrganizeExporter()
     let droneWorkflow = DroneWorkflowCoordinator()
     let localPhotosService = LocalPhotosService()
+    let externalDriveService = ExternalDriveTransferService()
 
     private var cancellables = Set<AnyCancellable>()
     private var albumLoadGeneration = 0
@@ -54,7 +55,7 @@ final class AppState: ObservableObject {
         organizeExporter.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
-        // Drone and Local Photos are observed directly by their views: forwarding their
+        // Drone, Local Media and External Drive are observed directly by their views: forwarding their
         // progress ticks here would re-render every view that depends on AppState.
     }
 
@@ -381,6 +382,18 @@ extension AppState {
 
     func enterLocalPhotosMode() {
         route = .localPhotos
+    }
+
+    func enterExternalDriveMode() {
+        route = .externalDrive
+        externalDriveService.check()
+    }
+
+    /// Opens the Move to External Drive source folder in Organize Local Media. No-op without a source.
+    func openSourceInLocalMedia() {
+        guard let source = externalDriveService.sourceURL else { return }
+        route = .localPhotos
+        localPhotosService.scan(directory: source)
     }
 }
 

@@ -6,4 +6,5 @@ enum AppRoute: Sendable, Equatable {
     case photos
     case drone
     case localPhotos
+    case externalDrive
 }

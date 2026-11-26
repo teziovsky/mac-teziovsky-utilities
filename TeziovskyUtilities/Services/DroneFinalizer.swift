@@ -201,7 +201,7 @@ final class DroneFinalizer: ObservableObject {
 
                 if MediaFileClassifier.isVideo(fileName) {
                     do {
-                        let backupURL = try makeBackup(of: compressedURL, fileManager: fileManager)
+                        let backupURL = try await makeBackup(of: compressedURL, fileManager: fileManager)
                         ops.append(.restoreFile(target: compressedURL, backup: backupURL))
                         try await VideoMetadataTransfer.transfer(from: sourceURL, to: compressedURL)
                     } catch {
@@ -447,10 +447,14 @@ final class DroneFinalizer: ObservableObject {
         canUndo = true
     }
 
-    private func makeBackup(of url: URL, fileManager: FileManager) throws -> URL {
+    /// Copies off the main actor: a compressed 4K export can be gigabytes, and the copy is a
+    /// full one when the project sits on an external drive.
+    private func makeBackup(of url: URL, fileManager: FileManager) async throws -> URL {
         let directory = try backupDir(fileManager: fileManager)
         let backupURL = directory.appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
-        try fileManager.copyItem(at: url, to: backupURL)
+        try await Task.detached(priority: .userInitiated) {
+            try FileManager.default.copyItem(at: url, to: backupURL)
+        }.value
         return backupURL
     }
 

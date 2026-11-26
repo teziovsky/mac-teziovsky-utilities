@@ -440,7 +440,7 @@ final class LocalPhotosService: ObservableObject {
                     currentPath: item.relativePath
                 )
                 do {
-                    try await repair(item)
+                    try await FileDateRepairExecutor.repair(item)
                     guard self.operationID == operationID else { return }
                     repairedIDs.insert(item.id)
                 } catch is CancellationError {
@@ -606,135 +606,6 @@ final class LocalPhotosService: ObservableObject {
     private func organize(_ item: LocalMediaOrganizationItem) async throws {
         try await LocalMediaOrganizer.move(item)
     }
-
-    private func repair(_ item: FileDateRepairItem) async throws {
-        let isVideo = MediaFileClassifier.isVideo(item.fileURL.lastPathComponent)
-        let before = try await MediaMetadataReader.readDateEvidence(url: item.fileURL, isVideo: isVideo)
-        guard let freshItem = FileDateRepairPlanner.makeItem(
-            fileURL: item.fileURL,
-            relativePath: item.relativePath,
-            evidence: before
-        ), abs(freshItem.currentCreationDate.timeIntervalSince(item.currentCreationDate)) <=
-            FileDateRepairPlanner.timestampTolerance,
-            abs(freshItem.proposedDate.timeIntervalSince(item.proposedDate)) <=
-            FileDateRepairPlanner.timestampTolerance else {
-            throw CocoaError(
-                .fileReadUnknown,
-                userInfo: [NSLocalizedDescriptionKey: "Dates changed since the scan. Rescan before repairing."]
-            )
-        }
-        guard let originalModification = before.first(where: {
-            $0.source == .filesystemModification
-        })?.date else {
-            throw CocoaError(
-                .fileReadUnknown,
-                userInfo: [NSLocalizedDescriptionKey: "The modification date could not be read safely."]
-            )
-        }
-
-        let embeddedSources = Set(
-            before.lazy.filter(\.source.isEmbeddedCreationDate).map(\.source)
-        )
-        let embeddedNeedsSync = FileDateRepairPlanner.embeddedCreationDatesNeedSync(
-            before,
-            target: item.proposedDate
-        )
-        let backupURL = try makeBackup(of: item.fileURL)
-        defer { try? FileManager.default.removeItem(at: backupURL) }
-
-        try Task.checkCancellation()
-        do {
-            try await synchronizeEmbeddedDates(
-                for: item,
-                isVideo: isVideo,
-                isRequired: embeddedNeedsSync
-            )
-            try Task.checkCancellation()
-            try FileDatePreservation.applyFileDates(
-                to: item.fileURL,
-                created: item.proposedDate,
-                modified: item.proposedDate
-            )
-            let after = try await MediaMetadataReader.readDateEvidence(
-                url: item.fileURL,
-                isVideo: isVideo
-            )
-            try Task.checkCancellation()
-            if let failure = FileDateRepairVerification.validate(
-                after,
-                expectedEmbeddedSources: embeddedNeedsSync ? embeddedSources : [],
-                target: item.proposedDate
-            ) {
-                throw CocoaError(
-                    .fileWriteUnknown,
-                    userInfo: [NSLocalizedDescriptionKey: failure.message]
-                )
-            }
-        } catch {
-            do {
-                try restoreBackup(
-                    backupURL,
-                    to: item.fileURL,
-                    created: item.currentCreationDate,
-                    modified: originalModification
-                )
-            } catch let rollbackError {
-                throw CocoaError(
-                    .fileWriteUnknown,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "\(error.localizedDescription) Rollback also failed: \(rollbackError.localizedDescription)"
-                    ]
-                )
-            }
-            throw error
-        }
-    }
-
-    private func synchronizeEmbeddedDates(
-        for item: FileDateRepairItem,
-        isVideo: Bool,
-        isRequired: Bool
-    ) async throws {
-        guard isRequired else { return }
-        if isVideo {
-            try await VideoMetadataTransfer.synchronizeCreationDates(
-                in: item.fileURL,
-                to: item.proposedDate
-            )
-        } else {
-            try FileDatePreservation.synchronizeImageCreationDates(
-                in: item.fileURL,
-                to: item.proposedDate
-            )
-        }
-    }
-
-    private func makeBackup(of fileURL: URL) throws -> URL {
-        let backupURL = fileURL.deletingLastPathComponent()
-            .appendingPathComponent(".date-repair-backup-\(UUID().uuidString)")
-            .appendingPathExtension(fileURL.pathExtension)
-        try FileManager.default.copyItem(at: fileURL, to: backupURL)
-        return backupURL
-    }
-
-    private func restoreBackup(
-        _ backupURL: URL,
-        to fileURL: URL,
-        created: Date,
-        modified: Date
-    ) throws {
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.removeItem(at: fileURL)
-        }
-        try fileManager.moveItem(at: backupURL, to: fileURL)
-        try FileDatePreservation.restoreFileDates(
-            created: created,
-            modified: modified,
-            to: fileURL
-        )
-    }
 }
 
 extension LocalPhotosService {
@@ -832,5 +703,138 @@ extension LocalPhotosService {
             }
             conversionSummary = summary
         }
+    }
+}
+
+/// Performs one date repair: backup, metadata rewrite, verification and rollback. Kept out of
+/// the main-actor service so copying, ImageIO rewrites and attribute writes never block the UI.
+enum FileDateRepairExecutor {
+    static func repair(_ item: FileDateRepairItem) async throws {
+        let isVideo = MediaFileClassifier.isVideo(item.fileURL.lastPathComponent)
+        let before = try await MediaMetadataReader.readDateEvidence(url: item.fileURL, isVideo: isVideo)
+        guard let freshItem = FileDateRepairPlanner.makeItem(
+            fileURL: item.fileURL,
+            relativePath: item.relativePath,
+            evidence: before
+        ), abs(freshItem.currentCreationDate.timeIntervalSince(item.currentCreationDate)) <=
+            FileDateRepairPlanner.timestampTolerance,
+            abs(freshItem.proposedDate.timeIntervalSince(item.proposedDate)) <=
+            FileDateRepairPlanner.timestampTolerance else {
+            throw CocoaError(
+                .fileReadUnknown,
+                userInfo: [NSLocalizedDescriptionKey: "Dates changed since the scan. Rescan before repairing."]
+            )
+        }
+        guard let originalModification = before.first(where: {
+            $0.source == .filesystemModification
+        })?.date else {
+            throw CocoaError(
+                .fileReadUnknown,
+                userInfo: [NSLocalizedDescriptionKey: "The modification date could not be read safely."]
+            )
+        }
+
+        let embeddedSources = Set(
+            before.lazy.filter(\.source.isEmbeddedCreationDate).map(\.source)
+        )
+        let embeddedNeedsSync = FileDateRepairPlanner.embeddedCreationDatesNeedSync(
+            before,
+            target: item.proposedDate
+        )
+        let backupURL = try makeBackup(of: item.fileURL)
+        defer { try? FileManager.default.removeItem(at: backupURL) }
+
+        try Task.checkCancellation()
+        do {
+            try await synchronizeEmbeddedDates(
+                for: item,
+                isVideo: isVideo,
+                isRequired: embeddedNeedsSync
+            )
+            try Task.checkCancellation()
+            try FileDatePreservation.applyFileDates(
+                to: item.fileURL,
+                created: item.proposedDate,
+                modified: item.proposedDate
+            )
+            let after = try await MediaMetadataReader.readDateEvidence(
+                url: item.fileURL,
+                isVideo: isVideo
+            )
+            try Task.checkCancellation()
+            if let failure = FileDateRepairVerification.validate(
+                after,
+                expectedEmbeddedSources: embeddedNeedsSync ? embeddedSources : [],
+                target: item.proposedDate
+            ) {
+                throw CocoaError(
+                    .fileWriteUnknown,
+                    userInfo: [NSLocalizedDescriptionKey: failure.message]
+                )
+            }
+        } catch {
+            do {
+                try restoreBackup(
+                    backupURL,
+                    to: item.fileURL,
+                    created: item.currentCreationDate,
+                    modified: originalModification
+                )
+            } catch let rollbackError {
+                throw CocoaError(
+                    .fileWriteUnknown,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "\(error.localizedDescription) Rollback also failed: \(rollbackError.localizedDescription)"
+                    ]
+                )
+            }
+            throw error
+        }
+    }
+
+    private static func synchronizeEmbeddedDates(
+        for item: FileDateRepairItem,
+        isVideo: Bool,
+        isRequired: Bool
+    ) async throws {
+        guard isRequired else { return }
+        if isVideo {
+            try await VideoMetadataTransfer.synchronizeCreationDates(
+                in: item.fileURL,
+                to: item.proposedDate
+            )
+        } else {
+            try FileDatePreservation.synchronizeImageCreationDates(
+                in: item.fileURL,
+                to: item.proposedDate
+            )
+        }
+    }
+
+    private static func makeBackup(of fileURL: URL) throws -> URL {
+        let backupURL = fileURL.deletingLastPathComponent()
+            .appendingPathComponent(".date-repair-backup-\(UUID().uuidString)")
+            .appendingPathExtension(fileURL.pathExtension)
+        try FileManager.default.copyItem(at: fileURL, to: backupURL)
+        return backupURL
+    }
+
+    private static func restoreBackup(
+        _ backupURL: URL,
+        to fileURL: URL,
+        created: Date,
+        modified: Date
+    ) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try fileManager.removeItem(at: fileURL)
+        }
+        try fileManager.moveItem(at: backupURL, to: fileURL)
+        try FileDatePreservation.restoreFileDates(
+            created: created,
+            modified: modified,
+            to: fileURL
+        )
     }
 }

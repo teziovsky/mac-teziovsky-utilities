@@ -46,6 +46,7 @@
 		A0010000000000000000F004 /* ExternalDriveMover.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F004 /* ExternalDriveMover.swift */; };
 		A0010000000000000000F005 /* ExternalDriveMoverFileSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F005 /* ExternalDriveMoverFileSystem.swift */; };
 		A0010000000000000000F006 /* ExternalDriveTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F006 /* ExternalDriveTransferService.swift */; };
+		A0010000000000000000F007 /* ExternalDriveNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F007 /* ExternalDriveNotifier.swift */; };
 		A00100000000000000000011 /* MediaMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000011 /* MediaMetadataReader.swift */; };
 		A00100000000000000000007 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000007 /* RootView.swift */; };
 		A00100000000000000000008 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* HomeView.swift */; };
@@ -114,6 +115,7 @@
 		B0010000000000000000F004 /* ExternalDriveMover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveMover.swift; sourceTree = "<group>"; };
 		B0010000000000000000F005 /* ExternalDriveMoverFileSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveMoverFileSystem.swift; sourceTree = "<group>"; };
 		B0010000000000000000F006 /* ExternalDriveTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveTransferService.swift; sourceTree = "<group>"; };
+		B0010000000000000000F007 /* ExternalDriveNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveNotifier.swift; sourceTree = "<group>"; };
 		B00100000000000000000011 /* MediaMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaMetadataReader.swift; sourceTree = "<group>"; };
 		B00100000000000000000007 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B00100000000000000000008 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				B0010000000000000000F004 /* ExternalDriveMover.swift */,
 				B0010000000000000000F005 /* ExternalDriveMoverFileSystem.swift */,
 				B0010000000000000000F006 /* ExternalDriveTransferService.swift */,
+				B0010000000000000000F007 /* ExternalDriveNotifier.swift */,
 				B00100000000000000000011 /* MediaMetadataReader.swift */,
 				B00200000000000000000002 /* FileDateRepairService.swift */,
 				B00300000000000000000001 /* LocalMediaConversion.swift */,
@@ -389,6 +392,7 @@
 				A0010000000000000000F004 /* ExternalDriveMover.swift in Sources */,
 				A0010000000000000000F005 /* ExternalDriveMoverFileSystem.swift in Sources */,
 				A0010000000000000000F006 /* ExternalDriveTransferService.swift in Sources */,
+				A0010000000000000000F007 /* ExternalDriveNotifier.swift in Sources */,
 				A00100000000000000000011 /* MediaMetadataReader.swift in Sources */,
 				A00100000000000000000007 /* RootView.swift in Sources */,
 				A00100000000000000000008 /* HomeView.swift in Sources */,

@@ -12,6 +12,7 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
     var trash: MoverFakeTrash!
     var notifications: TransferNotifySpy!
     var connection: TransferConnection!
+    var log: MoverLogRecorder!
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -24,62 +25,11 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         trash = try MoverFakeTrash(folder: root.appendingPathComponent("Trash", isDirectory: true))
         notifications = TransferNotifySpy()
         connection = TransferConnection()
+        log = MoverLogRecorder()
     }
 
     override func tearDownWithError() throws {
         if let root { try? FileManager.default.removeItem(at: root) }
-    }
-
-    // MARK: Fixtures
-
-    func makeService(copier: ExternalDriveCopying = CopyfileCopier(), freeBytes: Int64 = .max)
-        -> ExternalDriveTransferService {
-        let src = src!, dst = dst!, connection = connection!, notifications = notifications!
-        return ExternalDriveTransferService(
-            mover: ExternalDriveMover(copier: copier, trash: trash.trash),
-            preflight: { _ in connection.isConnected ? .ready(freeBytes: freeBytes) : .notConnected("gone") },
-            folders: { role in role == .source ? .resolved(src) : .resolved(dst) },
-            notify: { title, body in notifications.record(title, body) }
-        )
-    }
-
-    /// A JPEG whose EXIF date and Finder Created/Modified agree (local time), so it needs no repair.
-    func makePhoto(_ relativePath: String, in folder: URL? = nil, year: Int = 2024) throws {
-        let url = (folder ?? src).appendingPathComponent(relativePath)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let context = try XCTUnwrap(CGContext(
-            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ))
-        let destination = try XCTUnwrap(
-            CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
-        )
-        let properties: [CFString: Any] = [
-            kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "\(year):06:01 12:00:00"]
-        ]
-        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), properties as CFDictionary)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        var components = DateComponents(year: year, month: 6, day: 1, hour: 12)
-        components.timeZone = .current
-        let date = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: components))
-        let nanoseconds = Int64(date.timeIntervalSince1970) * 1_000_000_000
-        XCTAssertNil(ExternalDriveMoverFileSystem.setDates(created: nanoseconds, modified: nanoseconds, on: url))
-    }
-
-    func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
-
-    func waitUntilIdle(_ service: ExternalDriveTransferService) async throws {
-        let deadline = Date().addingTimeInterval(30)
-        while service.isRunning {
-            guard Date() < deadline else { return XCTFail("Service did not finish") }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-    }
-
-    func checked(_ service: ExternalDriveTransferService) async throws {
-        service.check()
-        try await waitUntilIdle(service)
-        XCTAssertNotNil(service.review, "check didn't produce a review")
     }
 
     // MARK: Tests
@@ -122,6 +72,13 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         XCTAssertEqual(notifications.calls.count, 1)
         XCTAssertEqual(notifications.calls.first?.title, "Move to External Drive")
         XCTAssertEqual(notifications.calls.first?.body, "Moved 1 of 1 to MEDIA")
+        XCTAssertEqual(summary.totalUnits, 1)
+        XCTAssertEqual(summary.notAttempted, [])
+        XCTAssertEqual(log.lines, [
+            "Move 1 files to MEDIA started",
+            "2024/a.jpg: moved",
+            "Move to MEDIA finished: 1 of 1 succeeded"
+        ])
     }
 
     func testNotConnectedBlocksCheck() async throws {
@@ -189,7 +146,16 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         XCTAssertTrue(exists(src.appendingPathComponent("2024/a.jpg")))
         XCTAssertTrue(exists(src.appendingPathComponent("2024/b.jpg")))
         XCTAssertTrue(trash.trashed.isEmpty)
-        XCTAssertEqual(notifications.calls.map(\.body), ["Moved 0 of 2 to MEDIA — 1 need attention"])
+        XCTAssertEqual(summary.totalUnits, 2)
+        XCTAssertEqual(summary.notAttempted, ["2024/b.jpg"])
+        XCTAssertFalse(summary.wasCancelled)
+        XCTAssertEqual(notifications.calls.map(\.body), ["Moved 0 of 2 to MEDIA — 2 need attention (stopped)"])
+        XCTAssertEqual(log.lines.first, "Move 2 files to MEDIA started")
+        XCTAssertTrue(log.lines.contains { $0.hasPrefix("2024/a.jpg: failed: ") }, "\(log.lines)")
+        XCTAssertEqual(log.lines.suffix(2), [
+            "2024/b.jpg: not attempted",
+            "Move to MEDIA stopped: MEDIA was disconnected. Connect it and press Check Again (⌘R)."
+        ])
     }
 
     func testCancelStopsAfterCurrentUnit() async throws {
@@ -218,7 +184,14 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         XCTAssertTrue(exists(src.appendingPathComponent("2024/b.jpg")))
         XCTAssertFalse(exists(dst.appendingPathComponent("2024/a.jpg")))
         XCTAssertFalse(exists(dst.appendingPathComponent("2024/.a.jpg.partial")))
-        XCTAssertEqual(notifications.calls.map(\.body), ["Moved 0 of 2 to MEDIA — 1 need attention (cancelled)"])
+        XCTAssertEqual(summary.notAttempted, ["2024/b.jpg"])
+        XCTAssertEqual(notifications.calls.map(\.body), ["Moved 0 of 2 to MEDIA — 2 need attention (cancelled)"])
+        XCTAssertEqual(log.lines, [
+            "Move 2 files to MEDIA started",
+            "2024/a.jpg: cancelled",
+            "2024/b.jpg: not attempted",
+            "Move to MEDIA cancelled: 0 of 2 succeeded"
+        ])
     }
 
     func testTrashExistingOriginalsTrashesIdenticalOnly() async throws {
@@ -256,6 +229,43 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
         XCTAssertTrue(exists(src.appendingPathComponent("2024/c.jpg")))
         XCTAssertEqual(notifications.calls.map(\.body),
                        ["Moved 1 of 2 originals already on MEDIA to the Trash — 1 need attention"])
+        XCTAssertEqual(log.lines.first, "Trash 2 originals already on MEDIA started")
+        XCTAssertEqual(log.lines[1], "2024/a.jpg: original moved to the Trash")
+        XCTAssertTrue(log.lines.contains { $0.hasPrefix("2024/c.jpg: different file on MEDIA: ") }, "\(log.lines)")
+        XCTAssertEqual(log.lines.last, "Trash originals already on MEDIA finished: 1 of 2 succeeded")
+    }
+
+    func testResetDuringARunWaitsForTheCurrentUnit() async throws {
+        try makePhoto("2024/a.jpg")
+        try makePhoto("2024/b.jpg")
+        let gate = TransferGate()
+        let copier = MoverHookCopier { _ in gate.arriveAndWait() }
+        let service = makeService(copier: copier)
+        try await checked(service)
+        let review = service.review
+
+        service.moveReady()
+        while !gate.hasArrived { try await Task.sleep(nanoseconds: 5_000_000) }
+        service.reset()
+        XCTAssertTrue(service.isTransferring, "reset only cancels while a unit is in flight")
+        XCTAssertEqual(service.step, .moving)
+        service.check()
+        XCTAssertFalse(service.isChecking, "a check is refused while moving")
+        XCTAssertEqual(service.review, review)
+        service.moveReady()
+        service.trashExistingOriginals()
+        XCTAssertEqual(service.progress.unitIndex, 0)
+
+        gate.open()
+        try await waitUntilIdle(service)
+
+        XCTAssertEqual(gate.arrivals, 1)
+        XCTAssertEqual(service.step, .review)
+        XCTAssertNil(service.summary)
+        XCTAssertNil(service.review)
+        XCTAssertTrue(exists(src.appendingPathComponent("2024/a.jpg")))
+        XCTAssertFalse(exists(dst.appendingPathComponent("2024/a.jpg")))
+        XCTAssertEqual(notifications.calls.map(\.body), ["Moved 0 of 2 to MEDIA — 2 need attention (cancelled)"])
     }
 
     func testGoBackFromSummaryRechecks() async throws {
@@ -294,6 +304,62 @@ final class ExternalDriveTransferServiceTests: XCTestCase {
     func testNotifierIsANoOpOutsideAnAppBundle() {
         XCTAssertNotEqual(Bundle.main.bundleURL.pathExtension, "app")
         ExternalDriveNotifier.post(title: "Move to External Drive", body: "test")
+    }
+}
+
+@MainActor
+extension ExternalDriveTransferServiceTests {
+    // MARK: Fixtures
+
+    func makeService(copier: ExternalDriveCopying = CopyfileCopier(), freeBytes: Int64 = .max)
+        -> ExternalDriveTransferService {
+        let src = src!, dst = dst!, connection = connection!, notifications = notifications!
+        return ExternalDriveTransferService(
+            mover: ExternalDriveMover(copier: copier, trash: trash.trash),
+            preflight: { _ in connection.isConnected ? .ready(freeBytes: freeBytes) : .notConnected("gone") },
+            folders: { role in role == .source ? .resolved(src) : .resolved(dst) },
+            notify: { title, body in notifications.record(title, body) },
+            log: log.append
+        )
+    }
+
+    /// A JPEG whose EXIF date and Finder Created/Modified agree (local time), so it needs no repair.
+    func makePhoto(_ relativePath: String, in folder: URL? = nil, year: Int = 2024) throws {
+        let url = (folder ?? src).appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
+        )
+        let properties: [CFString: Any] = [
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "\(year):06:01 12:00:00"]
+        ]
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), properties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        var components = DateComponents(year: year, month: 6, day: 1, hour: 12)
+        components.timeZone = .current
+        let date = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: components))
+        let nanoseconds = Int64(date.timeIntervalSince1970) * 1_000_000_000
+        XCTAssertNil(ExternalDriveMoverFileSystem.setDates(created: nanoseconds, modified: nanoseconds, on: url))
+    }
+
+    func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+
+    func waitUntilIdle(_ service: ExternalDriveTransferService) async throws {
+        let deadline = Date().addingTimeInterval(30)
+        while service.isRunning {
+            guard Date() < deadline else { return XCTFail("Service did not finish") }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    func checked(_ service: ExternalDriveTransferService) async throws {
+        service.check()
+        try await waitUntilIdle(service)
+        XCTAssertNotNil(service.review, "check didn't produce a review")
     }
 }
 

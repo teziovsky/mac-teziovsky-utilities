@@ -44,7 +44,7 @@ Start it from the home screen (it never runs on its own). Choose the two folders
 
 **Originals already on the drive.** *Trash Originals Already on <drive>…* is offered only for files whose copy on the drive is identical (same size, dates, flags, extended attributes and content); it asks first.
 
-**While it runs.** Progress and an ETA are shown, Cancel stops after the current file (a file that isn't verified yet is left unchanged), and the Mac is kept awake. If the drive is disconnected the run stops. At the end you get one notification and a summary; **Show Log** reveals the log of every file in Finder.
+**While it runs.** Progress and an ETA are shown, Cancel stops right away; the file in flight is rolled back and files already moved stay moved, and the Mac is kept awake. If the drive is disconnected the run stops. At the end you get one notification and a summary; **Show Log** reveals the log of every file in Finder.
 
 ### Organize Drone Footage
 
@@ -69,7 +69,7 @@ Every workflow uses the same shortcuts, all listed in the menu bar. When a short
 | ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose the source folder for this session | choose a project folder |
 | ⇧⌘R | File → Reveal in Finder | export folder | media folder | source folder | project folder |
 | ⌘R | View → Refresh | reload albums | rescan the folder | Check Again | re-check the current step |
-| ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | Check Again / move… / trash originals… (confirmed first) | continue / run step (destructive steps confirmed first) |
+| ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | Choose Source Folder… (or Choose Drive Folder…) until both are set; Move N Files… (confirmed first) when files are ready; otherwise Check Again; Done on the summary | continue / run step (destructive steps confirmed first) |
 | ⌥⌘Z | Edit → Undo Last Finalize Step | — | — | — | ✓ |
 | ⌘S | View → Toggle Sidebar | ✓ | — | — | — |
 | ⌘T | View → Toggle Thumbnail Display | ✓ | — | — | — |

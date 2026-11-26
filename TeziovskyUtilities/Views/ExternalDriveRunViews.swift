@@ -289,21 +289,27 @@ struct ExternalDriveFileRow: View {
 
 enum ExternalDriveReveal {
     /// Reveals the file in the source folder; if it's gone (moved or trashed), its copy on the drive;
-    /// otherwise the nearest folder that still exists.
+    /// otherwise the nearest existing folder inside the root it started from. Checks under security-scoped access.
     @MainActor
     static func file(_ relativePath: String, source: URL?, destination: ExternalDriveFolderResolution = .notChosen) {
-        var candidates: [URL] = []
-        if let source { candidates.append(source.appendingPathComponent(relativePath)) }
-        if case let .resolved(root) = destination { candidates.append(root.appendingPathComponent(relativePath)) }
+        var roots: [URL] = []
+        if let source { roots.append(source) }
+        if case let .resolved(root) = destination { roots.append(root) }
+        guard let firstRoot = roots.first else { return }
+        let accessed = roots.filter { $0.startAccessingSecurityScopedResource() }
+        defer { accessed.forEach { $0.stopAccessingSecurityScopedResource() } }
+
         let manager = FileManager.default
+        let candidates = roots.map { $0.appendingPathComponent(relativePath) }
         if let existing = candidates.first(where: { manager.fileExists(atPath: $0.path) }) {
             NSWorkspace.shared.activateFileViewerSelecting([existing])
             return
         }
-        guard var folder = candidates.first?.deletingLastPathComponent() else { return }
-        while !manager.fileExists(atPath: folder.path), folder.pathComponents.count > 1 {
-            folder = folder.deletingLastPathComponent()
+        let rootPath = firstRoot.standardizedFileURL.path
+        var folder = candidates[0].deletingLastPathComponent().standardizedFileURL
+        while folder.path.hasPrefix(rootPath + "/"), !manager.fileExists(atPath: folder.path) {
+            folder = folder.deletingLastPathComponent().standardizedFileURL
         }
-        NSWorkspace.shared.activateFileViewerSelecting([folder])
+        NSWorkspace.shared.activateFileViewerSelecting([folder.path.hasPrefix(rootPath) ? folder : firstRoot])
     }
 }

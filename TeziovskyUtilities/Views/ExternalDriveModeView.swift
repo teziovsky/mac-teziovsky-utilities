@@ -147,7 +147,10 @@ private struct ExternalDriveReviewCard: View {
             isPresented: $confirmsTrash,
             titleVisibility: .visible
         ) {
-            Button("Move to Trash") { service.trashExistingOriginals() }
+            Button("Move to Trash") {
+                service.trashExistingOriginals()
+                explainIfNotStarted(checksSpace: false)
+            }
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
         } message: {
@@ -367,16 +370,20 @@ private struct ExternalDriveReviewCard: View {
         )
     }
 
-    /// The service re-checks the drive before it starts; when it refuses, say why instead of doing nothing.
     private func startMove() {
         service.moveReady()
+        explainIfNotStarted(checksSpace: true)
+    }
+
+    /// The service re-checks the drive before a run starts; when it refuses, say why instead of doing nothing.
+    private func explainIfNotStarted(checksSpace: Bool) {
         guard !service.isTransferring else { return }
-        if let review = service.review, case let .notice(message) = moveAction(review) {
+        if checksSpace, let review = service.review, case let .notice(message) = moveAction(review) {
             appState.showNotice(message)
         } else if case let .notConnected(message) = service.preflightState {
             appState.showNotice(message)
         } else {
-            appState.showNotice("The move couldn't start. Press Check Again (⌘R) and try again.")
+            appState.showNotice("The run couldn't start. Press Check Again (⌘R) and try again.")
         }
     }
 }

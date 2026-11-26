@@ -347,8 +347,10 @@ extension LocalMediaOrganizationPlanner {
         let kept: FileDateEvidence?
     }
 
-    /// Inside a year folder only embedded dates can move a file, and a New Year's Eve shoot
-    /// stays in either neighbouring year. Elsewhere the oldest plausible date decides.
+    /// Inside a year folder only embedded capture dates (EXIF original/digitized, container
+    /// creation) can move a file; TIFF DateTime counts like a file-system date there. A New
+    /// Year's Eve shoot stays in either neighbouring year. Elsewhere the oldest plausible date
+    /// decides.
     private static func placement(
         in parent: URL,
         evidence: [FileDateEvidence],
@@ -365,7 +367,7 @@ extension LocalMediaOrganizationPlanner {
         }
 
         let embedded = FileDateRepairPlanner.oldestPlausibleEvidence(
-            in: evidence.filter(\.source.isEmbeddedCreationDate),
+            in: evidence.filter(\.source.decidesYearFolderPlacement),
             now: now
         )
         guard let embedded else {
@@ -381,15 +383,18 @@ extension LocalMediaOrganizationPlanner {
                          evidence: embedded, kept: nil)
     }
 
-    /// The calendar year, except that 1 January 00:00–05:59 local time counts as the
-    /// previous year: the tail of a New Year's Eve party.
+    /// The calendar year, except that 1 January 00:00:01–05:59:59 local time counts as the
+    /// previous year: the tail of a New Year's Eve party. Exactly 1 January 00:00:00 is a
+    /// "year only" placeholder and stays in its own year.
     static func placementYear(for date: Date, timeZone: TimeZone) -> Int {
-        let parts = calendar(in: timeZone).dateComponents([.year, .month, .day, .hour], from: date)
+        let calendar = calendar(in: timeZone)
+        let parts = calendar.dateComponents([.year, .month, .day, .hour], from: date)
         let year = parts.year ?? 0
-        if parts.month == 1, parts.day == 1, let hour = parts.hour, hour < 6 {
-            return year - 1
+        guard parts.month == 1, parts.day == 1, let hour = parts.hour, hour < 6 else {
+            return year
         }
-        return year
+        let isYearOnlyPlaceholder = date == calendar.startOfDay(for: date)
+        return isYearOnlyPlaceholder ? year : year - 1
     }
 
     /// True when the date falls in W(year) or W(year − 1), where W(Y) runs from 31 December Y

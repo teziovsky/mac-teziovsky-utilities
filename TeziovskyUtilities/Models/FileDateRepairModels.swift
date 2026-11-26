@@ -27,6 +27,17 @@ enum FileDateSource: String, CaseIterable, Sendable {
             return false
         }
     }
+
+    /// Embedded dates strong enough to move a file out of its year folder. TIFF DateTime is
+    /// often rewritten by editors, so there it counts like a file-system date.
+    var decidesYearFolderPlacement: Bool {
+        switch self {
+        case .exifOriginal, .exifDigitized, .containerCreation:
+            return true
+        case .tiffDateTime, .filesystemCreation, .filesystemModification:
+            return false
+        }
+    }
 }
 
 struct FileDateEvidence: Identifiable, Sendable, Equatable {

@@ -76,6 +76,50 @@ final class YearFolderTrustTests: XCTestCase {
         XCTAssertEqual(moveDestination(morning), "Inbox/2023/a.jpg")
     }
 
+    func testExactMidnightOnFirstJanuaryIsAYearOnlyPlaceholder() {
+        let midnight = local(2023, 1, 1, 0)
+        let placementYear = { LocalMediaOrganizationPlanner.placementYear(for: $0, timeZone: self.warsaw) }
+
+        XCTAssertEqual(placementYear(midnight), 2023, "1 Jan 00:00:00 stays in its own year")
+        XCTAssertEqual(placementYear(midnight.addingTimeInterval(1)), 2022, "1 Jan 00:00:01 is the night before")
+        XCTAssertEqual(placementYear(midnight.addingTimeInterval(0.5)), 2022, "a fraction past midnight is not exact")
+
+        let unsorted = plan("Inbox/a.jpg", [FileDateEvidence(source: .exifOriginal, date: midnight)])
+        XCTAssertEqual(moveDestination(unsorted), "Inbox/2023/a.jpg")
+        let inOtherYearFolder = plan("X/2019/a.jpg", [FileDateEvidence(source: .exifOriginal, date: midnight)])
+        XCTAssertEqual(moveDestination(inOtherYearFolder), "X/2023/a.jpg")
+        let justAfter = plan("X/2019/a.jpg", [
+            FileDateEvidence(source: .exifOriginal, date: midnight.addingTimeInterval(1))
+        ])
+        XCTAssertEqual(moveDestination(justAfter), "X/2022/a.jpg")
+    }
+
+    func testTIFFDateTimeAloneCannotMoveFileOutOfYearFolder() {
+        let agreeingFileSystem = plan("2019/a.jpg", [
+            FileDateEvidence(source: .tiffDateTime, date: local(2021, 4, 2, 12)),
+            FileDateEvidence(source: .filesystemCreation, date: local(2019, 6, 1, 12))
+        ])
+        XCTAssertEqual(agreeingFileSystem, .unchanged)
+
+        let disagreeing = plan("2019/a.jpg", [
+            FileDateEvidence(source: .tiffDateTime, date: local(2021, 4, 2, 12)),
+            FileDateEvidence(source: .filesystemCreation, date: local(2021, 6, 1, 12))
+        ])
+        guard case .kept(let item) = disagreeing else {
+            return XCTFail("Expected .kept, got \(disagreeing)")
+        }
+        XCTAssertEqual(item.yearFolder, "2019")
+        XCTAssertEqual(item.disagreeingDate, local(2021, 4, 2, 12))
+    }
+
+    func testTIFFDateTimeStillDecidesOutsideYearFolders() {
+        let outcome = plan("Inbox/a.jpg", [
+            FileDateEvidence(source: .tiffDateTime, date: local(2021, 4, 2, 12)),
+            FileDateEvidence(source: .filesystemCreation, date: local(2024, 6, 1, 12))
+        ])
+        XCTAssertEqual(moveDestination(outcome), "Inbox/2021/a.jpg")
+    }
+
     func testNewYearWindowUsesLocalTimeZone() {
         let lateEveningInWarsaw = utc(2022, 12, 31, 22, 30)
         let middayInWarsaw = utc(2023, 1, 1, 11, 30)

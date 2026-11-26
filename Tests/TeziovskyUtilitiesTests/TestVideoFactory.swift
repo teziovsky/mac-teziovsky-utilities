@@ -52,6 +52,132 @@ enum TestVideoFactory {
         }
     }
 
+    /// An HEVC movie whose sample entry is tagged `hev1` (as Android phones record it), which
+    /// AVFoundation can demux but not decode. Optionally adds a 16-bit PCM audio track.
+    static func makeHEV1Video(at url: URL, seconds: Int, fileType: AVFileType, pcmAudio: Bool = false) async throws {
+        let hvc1 = url.deletingLastPathComponent()
+            .appendingPathComponent("hvc1-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: hvc1) }
+        try await makeVideo(at: hvc1, seconds: seconds, fileType: .mov, codec: .hevc)
+
+        let asset = AVURLAsset(url: hvc1)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let descriptions = try await track.load(.formatDescriptions)
+        let source = try XCTUnwrap(descriptions.first)
+        let extensions = NSMutableDictionary(
+            dictionary: CMFormatDescriptionGetExtensions(source) ?? [:] as CFDictionary
+        )
+        extensions.removeObject(forKey: kCMFormatDescriptionExtension_VerbatimISOSampleEntry)
+        extensions.removeObject(forKey: kCMFormatDescriptionExtension_VerbatimSampleDescription)
+        extensions.removeObject(forKey: kCMFormatDescriptionExtension_FormatName)
+        let dimensions = CMVideoFormatDescriptionGetDimensions(source)
+        var hev1: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreate(
+            allocator: nil,
+            codecType: FourCharCode(0x6865_7631), // 'hev1'
+            width: dimensions.width,
+            height: dimensions.height,
+            extensions: extensions,
+            formatDescriptionOut: &hev1
+        )
+        let description = try XCTUnwrap(hev1)
+
+        try? FileManager.default.removeItem(at: url)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: description)
+        input.expectsMediaDataInRealTime = false
+        writer.add(input)
+        let audio = pcmAudio ? makePCMAudioInput() : nil
+        if let audio { writer.add(audio) }
+        guard reader.startReading(), writer.startWriting() else {
+            throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
+        }
+        writer.startSession(atSourceTime: .zero)
+        while let sample = output.copyNextSampleBuffer() {
+            while !input.isReadyForMoreMediaData {
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            input.append(try retagged(sample, as: description))
+        }
+        input.markAsFinished()
+        if let audio {
+            try await appendSilence(to: audio, seconds: seconds)
+        }
+        await writer.finishWriting()
+        if writer.status != .completed {
+            throw writer.error ?? CocoaError(.fileWriteUnknown)
+        }
+    }
+
+    private static func retagged(_ sample: CMSampleBuffer, as description: CMFormatDescription) throws -> CMSampleBuffer {
+        var timing = try sample.sampleTimingInfos()
+        var sizes = (try? sample.sampleSizes()) ?? []
+        var copy: CMSampleBuffer?
+        CMSampleBufferCreateReady(
+            allocator: nil,
+            dataBuffer: sample.dataBuffer,
+            formatDescription: description,
+            sampleCount: sample.numSamples,
+            sampleTimingEntryCount: timing.count,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: sizes.count,
+            sampleSizeArray: &sizes,
+            sampleBufferOut: &copy
+        )
+        return try XCTUnwrap(copy)
+    }
+
+    private static func makePCMAudioInput() -> AVAssetWriterInput {
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 8000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ])
+        input.expectsMediaDataInRealTime = false
+        return input
+    }
+
+    private static func appendSilence(to input: AVAssetWriterInput, seconds: Int) async throws {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 8000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0
+        )
+        var format: CMAudioFormatDescription?
+        CMAudioFormatDescriptionCreate(
+            allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil, magicCookieSize: 0,
+            magicCookie: nil, extensions: nil, formatDescriptionOut: &format
+        )
+        let frames = 8000 * seconds
+        let bytes = frames * 2
+        var block: CMBlockBuffer?
+        CMBlockBufferCreateWithMemoryBlock(
+            allocator: nil, memoryBlock: nil, blockLength: bytes, blockAllocator: nil,
+            customBlockSource: nil, offsetToData: 0, dataLength: bytes, flags: 0, blockBufferOut: &block
+        )
+        let data = try XCTUnwrap(block)
+        CMBlockBufferFillDataBytes(with: 0, blockBuffer: data, offsetIntoDestination: 0, dataLength: bytes)
+        var sample: CMSampleBuffer?
+        CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            allocator: nil, dataBuffer: data, formatDescription: try XCTUnwrap(format),
+            sampleCount: frames, presentationTimeStamp: .zero, packetDescriptions: nil, sampleBufferOut: &sample
+        )
+        while !input.isReadyForMoreMediaData {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        input.append(try XCTUnwrap(sample))
+        input.markAsFinished()
+    }
+
     static func creationDateItem(_ date: Date) -> AVMetadataItem {
         let item = AVMutableMetadataItem()
         item.keySpace = .quickTimeMetadata

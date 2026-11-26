@@ -158,6 +158,68 @@ final class ConversionPlanningTests: XCTestCase {
         XCTAssertEqual(item.kind, .legacyVideo(.mp4, .h264))
     }
 
+    /// Android records HEVC tagged `hev1`, which AVFoundation cannot decode: re-encoding it fails
+    /// with "Operation Stopped" (-11838). Retagging the copied stream as `hvc1` makes it play.
+    func testHEV1TaggedHEVCIsRewrappedAsPlayableHVC1() async throws {
+        let source = root.appendingPathComponent("clip.mp4")
+        try await TestVideoFactory.makeHEV1Video(at: source, seconds: 2, fileType: .mp4)
+        let sourceTrack = try await XCTUnwrapAsync(
+            try await AVURLAsset(url: source).loadTracks(withMediaType: .video).first
+        )
+        let sourceIsDecodable = try await sourceTrack.load(.isDecodable)
+        XCTAssertFalse(sourceIsDecodable, "Fixture must reproduce an undecodable hev1 track")
+
+        let plan = await LocalMediaConversionPlanner.plan(
+            fileURL: source,
+            relativePath: "clip.mp4",
+            rootDirectory: root,
+            config: config
+        )
+
+        guard case .convert(let item) = plan else {
+            return XCTFail("Expected a conversion, got \(plan)")
+        }
+        XCTAssertEqual(item.kind, .remuxVideo(.mp4))
+        XCTAssertEqual(item.destinationRelativePath, "clip-converted.mp4")
+
+        try await LocalMediaConverter.convert(item)
+
+        let output = AVURLAsset(url: item.destinationURL)
+        let track = try await XCTUnwrapAsync(try await output.loadTracks(withMediaType: .video).first)
+        let description = try await XCTUnwrapAsync(try await track.load(.formatDescriptions).first)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(description), kCMVideoCodecType_HEVC)
+        let isDecodable = try await track.load(.isDecodable)
+        let isPlayable = try await output.load(.isPlayable)
+        XCTAssertTrue(isDecodable)
+        XCTAssertTrue(isPlayable)
+        let duration = try await output.load(.duration).seconds
+        XCTAssertEqual(duration, 2, accuracy: 0.2)
+
+        // Android keeps the capture time only in the movie header, which a new file resets.
+        let capturedItem = try await AVURLAsset(url: source).load(.creationDate)
+        let captured = try await XCTUnwrapAsync(try await capturedItem?.load(.dateValue))
+        let evidence = try await MediaMetadataReader.readDateEvidence(url: item.destinationURL, isVideo: true)
+        let container = try XCTUnwrap(evidence.first { $0.source == .containerCreation }?.date)
+        XCTAssertEqual(container.timeIntervalSince1970, captured.timeIntervalSince1970, accuracy: 1)
+    }
+
+    func testUndecodableVideoThatCannotBeRewrappedIsUnsupportedInsteadOfReEncoded() async throws {
+        let source = root.appendingPathComponent("clip.mov")
+        try await TestVideoFactory.makeHEV1Video(at: source, seconds: 1, fileType: .mov, pcmAudio: true)
+
+        let plan = await LocalMediaConversionPlanner.plan(
+            fileURL: source,
+            relativePath: "clip.mov",
+            rootDirectory: root,
+            config: config
+        )
+
+        guard case .unsupported(let reason) = plan else {
+            return XCTFail("Expected .unsupported, got \(plan)")
+        }
+        XCTAssertTrue(reason.contains("cannot decode"), reason)
+    }
+
     func testHEICWithAnExistingJPEGTwinIsNotConvertedAgain() async throws {
         try Data().write(to: root.appendingPathComponent("photo.heic"))
         try Data().write(to: root.appendingPathComponent("photo.jpg"))

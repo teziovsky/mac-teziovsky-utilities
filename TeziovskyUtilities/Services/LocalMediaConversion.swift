@@ -114,6 +114,8 @@ enum LocalMediaConversionPlanner {
         }
         let videoCodec = await codec(of: videoTrack)
         let hasModernVideo = videoCodec.map(modernVideoCodecs.contains) ?? false
+        // HEVC tagged `hev1` (Android) is modern but macOS can't decode it until it is retagged.
+        let needsHVC1Tag = videoCodec == HEVCRetagger.hev1CodecType
         let isModernContainer = fileExtension == "mp4" || fileExtension == "mov"
         if isModernContainer, hasModernVideo {
             return nil
@@ -123,9 +125,16 @@ enum LocalMediaConversionPlanner {
         for track in tracks where track.mediaType == .audio {
             audioIsAAC = await codec(of: track) == kAudioFormatMPEG4AAC && audioIsAAC
         }
-        // Modern streams in an old container only need rewrapping: copy them losslessly.
-        if hasModernVideo, audioIsAAC {
+        // Modern streams in an old container (or tag) only need rewrapping: copy them losslessly.
+        if hasModernVideo || needsHVC1Tag, audioIsAAC {
             return .success(.remuxVideo(config.videoOutputContainer))
+        }
+        // Exportable assets can still have an undecodable track; re-encoding fails ("Operation Stopped").
+        guard (try? await videoTrack.load(.isDecodable)) == true else {
+            let name = videoCodec.map { " (\(fourCCString($0)))" } ?? ""
+            return .failure(UnsupportedReason(
+                message: "macOS cannot decode this video's codec\(name). Convert it with HandBrake or ffmpeg."
+            ))
         }
         guard (try? await asset.load(.isExportable)) == true else {
             return .failure(UnsupportedReason(
@@ -138,6 +147,11 @@ enum LocalMediaConversionPlanner {
     private static func codec(of track: AVAssetTrack) async -> FourCharCode? {
         guard let description = try? await track.load(.formatDescriptions).first else { return nil }
         return CMFormatDescriptionGetMediaSubType(description)
+    }
+
+    private static func fourCCString(_ code: FourCharCode) -> String {
+        let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }
+        return String(bytes: bytes, encoding: .ascii)?.trimmingCharacters(in: .whitespaces) ?? "\(code)"
     }
 
     static func resolveCollisions(
@@ -373,10 +387,15 @@ enum LocalMediaConverter {
         container: LocalVideoOutputContainer
     ) async throws {
         let asset = AVURLAsset(url: sourceURL)
+        let outputType: AVFileType = container == .mp4 ? .mp4 : .mov
+        if try await videoSubtype(of: asset) == HEVCRetagger.hev1CodecType {
+            // Passthrough export would keep the undecodable `hev1` tag.
+            try await HEVCRetagger.rewrap(sourceURL, to: destinationURL, fileType: outputType)
+            return
+        }
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
             throw LocalMediaConversionError.exportUnavailable
         }
-        let outputType: AVFileType = container == .mp4 ? .mp4 : .mov
         guard session.supportedFileTypes.contains(outputType) else {
             throw LocalMediaConversionError.unsupportedOutput
         }
@@ -387,16 +406,23 @@ enum LocalMediaConverter {
         try await runExport(session)
     }
 
-    /// A rewrapped file must play and keep the source's video codec and duration.
+    private static func videoSubtype(of asset: AVAsset) async throws -> FourCharCode? {
+        guard let track = try await asset.loadTracks(withMediaType: .video).first,
+              let description = try await track.load(.formatDescriptions).first else { return nil }
+        return CMFormatDescriptionGetMediaSubType(description)
+    }
+
+    /// A rewrapped file must play and keep the source's video codec (`hev1` → `hvc1`) and duration.
     private static func verifyRemux(_ url: URL, source: URL) async throws {
         let output = AVURLAsset(url: url)
         let original = AVURLAsset(url: source)
         guard try await output.load(.isPlayable),
-              let outputTrack = try await output.loadTracks(withMediaType: .video).first,
-              let sourceTrack = try await original.loadTracks(withMediaType: .video).first,
-              let outputCodec = try await outputTrack.load(.formatDescriptions).first,
-              let sourceCodec = try await sourceTrack.load(.formatDescriptions).first,
-              CMFormatDescriptionGetMediaSubType(outputCodec) == CMFormatDescriptionGetMediaSubType(sourceCodec) else {
+              let outputCodec = try await videoSubtype(of: output),
+              var sourceCodec = try await videoSubtype(of: original) else {
+            throw LocalMediaConversionError.verificationFailed
+        }
+        if sourceCodec == HEVCRetagger.hev1CodecType { sourceCodec = kCMVideoCodecType_HEVC }
+        guard outputCodec == sourceCodec else {
             throw LocalMediaConversionError.verificationFailed
         }
         let outputDuration = try await output.load(.duration).seconds

@@ -13,6 +13,26 @@ final class DestinationAlbumTitleTests: XCTestCase {
     }
 }
 
+final class DoneAlbumsFolderTitleTests: XCTestCase {
+    func testBlankSettingMeansNewDoneAlbumsStayAtTheTopLevel() {
+        XCTAssertNil(PhotosService.doneAlbumsFolderTitle(fromSetting: ""))
+        XCTAssertNil(PhotosService.doneAlbumsFolderTitle(fromSetting: "   "))
+    }
+
+    func testFolderNameIsTrimmed() {
+        XCTAssertEqual(PhotosService.doneAlbumsFolderTitle(fromSetting: " _zgrane "), "_zgrane")
+    }
+
+    func testDefaultFolderIsZgrane() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: AppSettings.doneAlbumsFolderNameKey)
+        defer { defaults.set(previous, forKey: AppSettings.doneAlbumsFolderNameKey) }
+        defaults.removeObject(forKey: AppSettings.doneAlbumsFolderNameKey)
+
+        XCTAssertEqual(AppSettings.doneAlbumsFolderName, "_zgrane")
+    }
+}
+
 final class ExportedFileMarkerTests: XCTestCase {
     private var directory: URL!
 

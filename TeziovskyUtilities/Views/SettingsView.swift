@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var excludedSuffix: String = AppSettings.excludedAlbumSuffix
+    @State private var doneAlbumsFolderName: String = AppSettings.doneAlbumsFolderName
     @State private var omittedAlbumIDs: Set<String> = AppSettings.omittedFromOrganizeAlbumIDs
     @State private var organizeByYearEnabled: Bool = AppSettings.organizeByYearEnabled
     @State private var droneCompressedSuffix: String = AppSettings.droneCompressedSuffix
@@ -26,6 +27,7 @@ struct SettingsView: View {
         TabView {
             PhotosSettingsTab(
                 excludedSuffix: persisted($excludedSuffix) { AppSettings.excludedAlbumSuffix = $0 },
+                doneAlbumsFolderName: persisted($doneAlbumsFolderName) { AppSettings.doneAlbumsFolderName = $0 },
                 omittedAlbumIDs: $omittedAlbumIDs,
                 organizeByYearEnabled: persisted($organizeByYearEnabled) { AppSettings.organizeByYearEnabled = $0 }
             )
@@ -78,6 +80,7 @@ struct SettingsView: View {
         .frame(width: 520, height: 640)
         .onAppear {
             excludedSuffix = AppSettings.excludedAlbumSuffix
+            doneAlbumsFolderName = AppSettings.doneAlbumsFolderName
             omittedAlbumIDs = AppSettings.omittedFromOrganizeAlbumIDs
             organizeByYearEnabled = AppSettings.organizeByYearEnabled
             droneCompressedSuffix = AppSettings.droneCompressedSuffix
@@ -426,6 +429,7 @@ private struct DroneSettingsTab: View {
 private struct PhotosSettingsTab: View {
     @EnvironmentObject private var appState: AppState
     @Binding var excludedSuffix: String
+    @Binding var doneAlbumsFolderName: String
     @Binding var omittedAlbumIDs: Set<String>
     @Binding var organizeByYearEnabled: Bool
     @AppStorage(AppSettings.photosExportEditedVersionsKey) private var exportEditedVersions = true
@@ -474,6 +478,15 @@ private struct PhotosSettingsTab: View {
                 Text("Default: _zgrane")
                     .font(AlbumListRowStyle.detailFont)
                     .foregroundStyle(.secondary)
+                TextField("Folder for done albums", text: $doneAlbumsFolderName)
+                    .help("New albums with the suffix are created inside this Photos folder.")
+                Text(
+                    "New done albums are created in this folder; it is created if missing. "
+                        + "Existing albums are not moved. Leave blank to keep new albums at the top level. "
+                        + "Default: _zgrane"
+                )
+                .font(AlbumListRowStyle.detailFont)
+                .foregroundStyle(.secondary)
             }
 
             Section("Omit from Organize") {

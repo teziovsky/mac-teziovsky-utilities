@@ -140,6 +140,7 @@ Set your development team in Xcode for signed release builds outside this repo (
 ## Settings
 
 - **Excluded album suffix** — albums whose names end with this suffix are hidden (default: `_zgrane`); organized items move to `<album><suffix>`, so Organize is disabled while it is empty
+- **Folder for done albums** — Photos folder new `<album><suffix>` albums are created in (default: `_zgrane`); the folder is created if missing, existing albums are not moved, blank keeps new albums at the top level
 - **Omit from Organize** — hide albums from the sidebar and disable Organize for them
 - **Export folder** — destination for the Organize action
 - **Export edited versions when available** — export the edited render (default) or the unmodified original

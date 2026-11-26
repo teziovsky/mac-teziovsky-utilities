@@ -125,6 +125,12 @@ final class PhotosService: NSObject, ObservableObject {
         return trimmed.isEmpty ? nil : sourceName + trimmed
     }
 
+    /// The Photos folder new "done" albums go into. nil for a blank setting: they stay at the top level.
+    nonisolated static func doneAlbumsFolderTitle(fromSetting setting: String) -> String? {
+        let trimmed = setting.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     func moveAsset(
         _ asset: PHAsset,
         fromSourceAlbum sourceAlbum: PhotoAlbum,
@@ -160,7 +166,10 @@ final class PhotosService: NSObject, ObservableObject {
         if let existing = Self.fetchCollection(title: title) {
             collection = existing
         } else {
-            collection = try await Self.createAlbum(title: title)
+            collection = try await Self.createAlbum(
+                title: title,
+                inFolderTitled: Self.doneAlbumsFolderTitle(fromSetting: AppSettings.doneAlbumsFolderName)
+            )
         }
         albumIdentifiersByTitle[title] = collection.localIdentifier
         return collection
@@ -294,33 +303,6 @@ final class PhotosService: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private static func createAlbum(title: String) async throws -> PHAssetCollection {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<PHAssetCollection, Error>) in
-            var createdIdentifier: String?
-            PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
-                createdIdentifier = request.placeholderForCreatedAssetCollection.localIdentifier
-            } completionHandler: { success, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard success,
-                      let createdIdentifier,
-                      let collection = PHAssetCollection.fetchAssetCollections(
-                        withLocalIdentifiers: [createdIdentifier],
-                        options: nil
-                      ).firstObject else {
-                    continuation.resume(
-                        throwing: PhotosServiceError.organizeFailed("Could not create album \"\(title)\".")
-                    )
-                    return
-                }
-                continuation.resume(returning: collection)
-            }
-        }
-    }
-
     nonisolated private static func fetchContents(in collection: PHAssetCollection) -> AlbumContents {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
@@ -388,4 +370,64 @@ extension PhotosService: PHPhotoLibraryChangeObserver {
 struct AlbumContents: @unchecked Sendable {
     let items: [MediaItem]
     let assetsByID: [String: PHAsset]
+}
+
+// MARK: - Creating "done" albums
+
+extension PhotosService {
+    private typealias AlbumContinuation = CheckedContinuation<PHAssetCollection, Error>
+
+    nonisolated private static func fetchFolder(title: String) -> PHCollectionList? {
+        let folders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: nil)
+        var index = 0
+        while index < folders.count {
+            let folder = folders.object(at: index)
+            if folder.localizedTitle == title {
+                return folder
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// Creates the album inside `folderTitle` (creating the folder when it doesn't exist) in one
+    /// change, so the album never shows up at the top level first.
+    nonisolated private static func createAlbum(
+        title: String,
+        inFolderTitled folderTitle: String?
+    ) async throws -> PHAssetCollection {
+        let existingFolder = folderTitle.flatMap { fetchFolder(title: $0) }
+        return try await withCheckedThrowingContinuation { (continuation: AlbumContinuation) in
+            var createdIdentifier: String?
+            PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
+                let placeholder = request.placeholderForCreatedAssetCollection
+                createdIdentifier = placeholder.localIdentifier
+                if let existingFolder {
+                    PHCollectionListChangeRequest(for: existingFolder)?
+                        .addChildCollections([placeholder] as NSArray)
+                } else if let folderTitle {
+                    PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: folderTitle)
+                        .addChildCollections([placeholder] as NSArray)
+                }
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard success,
+                      let createdIdentifier,
+                      let collection = PHAssetCollection.fetchAssetCollections(
+                        withLocalIdentifiers: [createdIdentifier],
+                        options: nil
+                      ).firstObject else {
+                    continuation.resume(
+                        throwing: PhotosServiceError.organizeFailed("Could not create album \"\(title)\".")
+                    )
+                    return
+                }
+                continuation.resume(returning: collection)
+            }
+        }
+    }
 }

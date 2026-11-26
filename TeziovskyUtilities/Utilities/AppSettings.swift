@@ -2,6 +2,7 @@ import Foundation
 
 enum AppSettings {
     private static let excludedSuffixKey = "excludedAlbumSuffix"
+    static let doneAlbumsFolderNameKey = "doneAlbumsFolderName"
     private static let omittedFromOrganizeAlbumIDsKey = "omittedFromOrganizeAlbumIDs"
     private static let thumbnailDisplayModeKey = "thumbnailDisplayMode"
     private static let mediaGridColumnCountKey = "mediaGridColumnCount"
@@ -338,5 +339,17 @@ enum AppSettings {
             return nil
         }
         return url
+    }
+}
+
+extension AppSettings {
+    /// Photos folder that new "done" albums are created in. Blank keeps them at the top level.
+    static var doneAlbumsFolderName: String {
+        get {
+            UserDefaults.standard.string(forKey: doneAlbumsFolderNameKey) ?? "_zgrane"
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: doneAlbumsFolderNameKey)
+        }
     }
 }

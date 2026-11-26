@@ -58,3 +58,37 @@ final class MoverFlushRecorder: @unchecked Sendable {
     var events: [String] { lock.withLock { stored } }
     func note(_ event: String) { lock.withLock { stored.append(event) } }
 }
+
+// MARK: - Pinned volume
+
+extension ExternalDriveMoverTests {
+    func testADifferentVolumeAtTheDrivePathIsUnavailable() throws {
+        let source = try makeSource("2019/a.jpg")
+        let mover = ExternalDriveMover(trash: trash.trash, deviceID: { _ in 2 })
+
+        let outcome = mover.move(unit(["2019/a.jpg"]), sourceRoot: src, destinationRoot: dst, destinationDevice: 1,
+                                 checkedFingerprints: try fingerprints(["2019/a.jpg"]), progress: { _ in true })
+        XCTAssertEqual(outcome, .destinationUnavailable)
+        XCTAssertEqual(mover.trashOriginalIfIdentical(unit(["2019/a.jpg"]), sourceRoot: src, destinationRoot: dst,
+                                                      destinationDevice: 1),
+                       .destinationUnavailable)
+
+        XCTAssertEqual(destinationEntries(), [])
+        XCTAssertTrue(exists(source))
+        XCTAssertTrue(trash.trashed.isEmpty)
+    }
+
+    func testTheSameVolumeMoves() throws {
+        try makeSource("2019/a.jpg")
+        let mover = ExternalDriveMover(trash: trash.trash)
+        let device = try XCTUnwrap(mover.destinationDevice(dst))
+        var info = stat()
+        XCTAssertEqual(stat(dst.path, &info), 0)
+        XCTAssertEqual(device, info.st_dev)
+
+        let outcome = mover.move(unit(["2019/a.jpg"]), sourceRoot: src, destinationRoot: dst,
+                                 destinationDevice: device,
+                                 checkedFingerprints: try fingerprints(["2019/a.jpg"]), progress: { _ in true })
+        XCTAssertEqual(outcome, .moved)
+    }
+}

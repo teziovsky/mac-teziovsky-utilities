@@ -26,6 +26,8 @@ private struct ExternalDriveRunContext: Sendable {
     let kind: ExternalDriveRunSummary.Kind
     let source: URL
     let destinationRoot: URL
+    /// The drive's volume when the run started; a unit on another volume at the same path stops the run.
+    let destinationDevice: dev_t?
     let fingerprints: [String: FileMetadataFingerprint]
     let control: ExternalDriveRunControl
     let operationID: UUID
@@ -56,6 +58,7 @@ final class ExternalDriveTransferService: ObservableObject {
     private let preflight: (ExternalDriveFolderResolution) -> ExternalDrivePreflight
     private let folders: (ExternalDriveFolderRole) -> ExternalDriveFolderResolution
     private let notify: (String, String) -> Void
+    private let requestNotificationPermission: () -> Void
     private let log: @Sendable (String) -> Void
 
     private var sourceOverride: URL?
@@ -78,12 +81,14 @@ final class ExternalDriveTransferService: ObservableObject {
         folders: @escaping (ExternalDriveFolderRole) -> ExternalDriveFolderResolution =
             AppSettings.resolveExternalDriveFolder,
         notify: @escaping (String, String) -> Void = ExternalDriveNotifier.post,
+        requestNotificationPermission: @escaping () -> Void = ExternalDriveNotifier.requestAuthorization,
         log: @escaping @Sendable (String) -> Void = { ExternalDriveLog.shared.append($0) }
     ) {
         self.mover = mover
         self.preflight = preflight
         self.folders = folders
         self.notify = notify
+        self.requestNotificationPermission = requestNotificationPermission
         self.log = log
     }
 
@@ -321,10 +326,9 @@ extension ExternalDriveTransferService {
             unitCount: units.count, bytesTotal: units.reduce(0) { $0 + $1.byteCount }, startedAt: Date())
         step = .moving
         sleepAssertion.acquire(reason: activityTitle ?? Self.notificationTitle)
-        let run = ExternalDriveRunContext(
-            kind: kind, source: source, destinationRoot: destinationRoot,
-            fingerprints: checkedFingerprints, control: control, operationID: operationID,
-            destinationName: destinationName, log: log)
+        // Ask now, while the owner is here, so the notification at the end can show.
+        requestNotificationPermission()
+        let (fingerprints, destinationName, log, mover) = (checkedFingerprints, destinationName, log, mover)
         let fileCount = units.reduce(0) { $0 + $1.relativePaths.count }
         log(kind == .move ? "Move \(fileCount) files to \(destinationName) started"
                           : "Trash \(fileCount) originals already on \(destinationName) started")
@@ -337,6 +341,12 @@ extension ExternalDriveTransferService {
                 if sourceAccess { source.stopAccessingSecurityScopedResource() }
                 if destinationAccess { destinationRoot.stopAccessingSecurityScopedResource() }
             }
+            // Read with access granted: the sandbox may refuse to stat the drive folder before.
+            let run = ExternalDriveRunContext(
+                kind: kind, source: source, destinationRoot: destinationRoot,
+                destinationDevice: mover.destinationDevice(destinationRoot),
+                fingerprints: fingerprints, control: control, operationID: operationID,
+                destinationName: destinationName, log: log)
 
             var results: [ExternalDriveRunResult] = []
             var stoppedReason: String?
@@ -384,13 +394,15 @@ extension ExternalDriveTransferService {
         switch run.kind {
         case .move:
             return mover.move(unit, sourceRoot: run.source, destinationRoot: run.destinationRoot,
+                              destinationDevice: run.destinationDevice,
                               checkedFingerprints: run.fingerprints) { bytes in
                 if run.control.shouldReport() { report(bytes) }
                 return !run.control.isCancelled
             }
         case .trashExisting:
             return mover.trashOriginalIfIdentical(unit, sourceRoot: run.source,
-                                                  destinationRoot: run.destinationRoot)
+                                                  destinationRoot: run.destinationRoot,
+                                                  destinationDevice: run.destinationDevice)
         }
     }
 
@@ -401,9 +413,14 @@ extension ExternalDriveTransferService {
         default: return nil
         }
         let state = preflight(destination)
-        if case .ready = state { return nil }
-        preflightState = state
-        return "\(destinationName) was disconnected. Connect it and press Check Again (⌘R)."
+        guard case .ready = state else {
+            preflightState = state
+            return "\(destinationName) was disconnected. Connect it and press Check Again (⌘R)."
+        }
+        // Still mounted, but not the volume the run started on (or not reachable for this unit).
+        guard outcome == .destinationUnavailable else { return nil }
+        return "\(destinationName) is no longer the drive this run started on. "
+            + "Connect it and press Check Again (⌘R)."
     }
 
     private func beginUnit(_ index: Int, _ unit: ExternalDriveUnit, completedBytes: Int64) {
@@ -468,7 +485,7 @@ extension ExternalDriveTransferService {
         } else {
             log("\(runName) finished: \(tally)")
         }
-        notify(Self.notificationTitle, notificationBody(finished))
+        notify(Self.notificationTitle, ExternalDriveText.notificationBody(finished, destinationName: destinationName))
 
         if resetAfterRun {
             resetAfterRun = false
@@ -477,20 +494,5 @@ extension ExternalDriveTransferService {
             // Last: observers waiting for the summary see the finished state.
             step = .summary
         }
-    }
-
-    private func notificationBody(_ summary: ExternalDriveRunSummary) -> String {
-        let (done, total) = (summary.succeededUnits, summary.totalUnits)
-        var body = switch summary.kind {
-        case .move: "Moved \(done) of \(total) to \(destinationName)"
-        case .trashExisting: "Moved \(done) of \(total) originals already on \(destinationName) to the Trash"
-        }
-        if summary.needAttentionCount > 0 { body += " — \(summary.needAttentionCount) need attention" }
-        if summary.wasCancelled {
-            body += " (cancelled)"
-        } else if summary.stoppedReason != nil {
-            body += " (stopped)"
-        }
-        return body
     }
 }

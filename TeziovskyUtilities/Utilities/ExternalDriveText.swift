@@ -71,6 +71,22 @@ enum ExternalDriveText {
         }
     }
 
+    /// The one notification a run posts when it ends.
+    static func notificationBody(_ summary: ExternalDriveRunSummary, destinationName: String) -> String {
+        let (done, total) = (summary.succeededUnits, summary.totalUnits)
+        var body = switch summary.kind {
+        case .move: "Moved \(done) of \(total) to \(destinationName)"
+        case .trashExisting: "Moved \(done) of \(total) originals already on \(destinationName) to the Trash"
+        }
+        if summary.needAttentionCount > 0 { body += " — \(summary.needAttentionCount) need attention" }
+        if summary.wasCancelled {
+            body += " (cancelled)"
+        } else if summary.stoppedReason != nil {
+            body += " (stopped)"
+        }
+        return body
+    }
+
     /// "File 37 of 240 · 1 GB of 9 GB · about 4 min left"; the estimate only once there is one.
     static func movingLine(_ progress: ExternalDriveProgress, done: String, total: String, remaining: String?)
         -> String {

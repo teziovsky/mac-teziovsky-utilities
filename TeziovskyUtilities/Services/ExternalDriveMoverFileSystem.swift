@@ -137,6 +137,12 @@ enum ExternalDriveMoverFileSystem {
         if fsync(descriptor) != 0 { throw lastError() }
     }
 
+    /// The device the folder lives on, so a run can tell when another volume took the drive's place.
+    static func deviceID(of url: URL) -> dev_t? {
+        var info = stat()
+        return stat(url.path, &info) == 0 ? info.st_dev : nil
+    }
+
     static func isSameFile(_ lhs: URL, _ rhs: URL) throws -> Bool {
         var left = stat()
         var right = stat()

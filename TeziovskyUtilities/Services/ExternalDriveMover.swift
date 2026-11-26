@@ -76,21 +76,25 @@ struct ExternalDriveMover: Sendable {
     static let defaultFlush: @Sendable ([URL], URL) throws -> Void = { files, destinationRoot in
         try ExternalDriveMoverFileSystem.flush(files, destinationRoot: destinationRoot)
     }
+    static let defaultDeviceID: @Sendable (URL) -> dev_t? = { ExternalDriveMoverFileSystem.deviceID(of: $0) }
 
     private let copier: ExternalDriveCopying
     private let trash: @Sendable (URL) throws -> Void
     private let flush: @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void
+    private let deviceID: @Sendable (URL) -> dev_t?
     private let log: @Sendable (String) -> Void
     private let renameStrategy: ExternalDriveRenameStrategy
 
     init(copier: ExternalDriveCopying = CopyfileCopier(),
          trash: @escaping @Sendable (URL) throws -> Void = defaultTrash,
          flush: @escaping @Sendable (_ files: [URL], _ destinationRoot: URL) throws -> Void = defaultFlush,
+         deviceID: @escaping @Sendable (URL) -> dev_t? = defaultDeviceID,
          log: @escaping @Sendable (String) -> Void = { _ in },
          renameStrategy: ExternalDriveRenameStrategy = .exclusiveRename) {
         self.copier = copier
         self.trash = trash
         self.flush = flush
+        self.deviceID = deviceID
         self.log = log
         self.renameStrategy = renameStrategy
     }
@@ -120,7 +124,18 @@ struct ExternalDriveMover: Sendable {
 
     // MARK: Move
 
-    func move(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL,
+    /// The volume the drive folder is on now; a run pins it and passes it to every unit.
+    func destinationDevice(_ destinationRoot: URL) -> dev_t? {
+        deviceID(destinationRoot)
+    }
+
+    /// False when another volume now sits at the drive folder's path (the drive was swapped mid-run).
+    private func isPinnedVolume(_ destinationRoot: URL, _ destinationDevice: dev_t?) -> Bool {
+        guard let destinationDevice else { return true }
+        return deviceID(destinationRoot) == destinationDevice
+    }
+
+    func move(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL, destinationDevice: dev_t? = nil,
               checkedFingerprints: [String: FileMetadataFingerprint],
               progress: @Sendable (Int64) -> Bool) -> ExternalDriveUnitOutcome {
         guard !unit.relativePaths.isEmpty else { return .failed(Self.nothingToMoveMessage) }
@@ -137,6 +152,9 @@ struct ExternalDriveMover: Sendable {
 
         let created = Created()
         do {
+            guard isPinnedVolume(destinationRoot, destinationDevice) else {
+                throw Stop(outcome: .destinationUnavailable)
+            }
             try prepareFolders(for: members, destinationRoot: destinationRoot, created: created)
             var completed: Int64 = 0
             for member in members {
@@ -360,9 +378,10 @@ extension ExternalDriveMover {
     /// destination file is identical to its original (and is a different file, not the original itself).
     /// A member whose original is already gone while its copy exists (a pair half-trashed by an earlier
     /// run) counts as done.
-    func trashOriginalIfIdentical(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL)
-        -> ExternalDriveUnitOutcome {
+    func trashOriginalIfIdentical(_ unit: ExternalDriveUnit, sourceRoot: URL, destinationRoot: URL,
+                                  destinationDevice: dev_t? = nil) -> ExternalDriveUnitOutcome {
         guard !unit.relativePaths.isEmpty else { return .failed(Self.nothingToMoveMessage) }
+        guard isPinnedVolume(destinationRoot, destinationDevice) else { return .destinationUnavailable }
         var toTrash: [String] = []
         var firstDifference: String?
         for path in unit.relativePaths {

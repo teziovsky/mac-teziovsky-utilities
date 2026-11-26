@@ -3,8 +3,8 @@ import SwiftUI
 
 private enum HomeCardKind: Hashable {
     case photos
-    case drone
     case localPhotos
+    case drone
 }
 
 /// Landing screen letting the user pick a workflow.
@@ -38,18 +38,6 @@ struct HomeView: View {
                 .prefersDefaultFocus(false, in: homeFocusScope)
 
                 HomeModeCard(
-                    kind: .drone,
-                    title: AppBranding.droneModeTitle,
-                    subtitle: AppBranding.droneModeSubtitle,
-                    systemImage: AppBranding.droneModeIcon,
-                    acceptsFocus: cardsAcceptFocus,
-                    focus: $focusedCard
-                ) {
-                    appState.enterDroneMode()
-                }
-                .prefersDefaultFocus(false, in: homeFocusScope)
-
-                HomeModeCard(
                     kind: .localPhotos,
                     title: AppBranding.localPhotosModeTitle,
                     subtitle: AppBranding.localPhotosModeSubtitle,
@@ -58,6 +46,18 @@ struct HomeView: View {
                     focus: $focusedCard
                 ) {
                     appState.enterLocalPhotosMode()
+                }
+                .prefersDefaultFocus(false, in: homeFocusScope)
+
+                HomeModeCard(
+                    kind: .drone,
+                    title: AppBranding.droneModeTitle,
+                    subtitle: AppBranding.droneModeSubtitle,
+                    systemImage: AppBranding.droneModeIcon,
+                    acceptsFocus: cardsAcceptFocus,
+                    focus: $focusedCard
+                ) {
+                    appState.enterDroneMode()
                 }
                 .prefersDefaultFocus(false, in: homeFocusScope)
             }

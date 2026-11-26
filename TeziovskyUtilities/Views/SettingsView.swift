@@ -33,6 +33,22 @@ struct SettingsView: View {
                 Label("Photos", systemImage: "photo.on.rectangle.angled")
             }
 
+            LocalPhotosSettingsTab(
+                extensions: persisted($localMediaExtensions) { AppSettings.localMediaExtensions = $0 },
+                convertHEIC: persisted($convertHEIC) { AppSettings.localConvertHEIC = $0 },
+                convertLegacyVideos: persisted($convertLegacyVideos) { AppSettings.localConvertLegacyVideos = $0 },
+                keepOriginalsAfterConversion: persisted($keepOriginalsAfterConversion) {
+                    AppSettings.localKeepOriginalsAfterConversion = $0
+                },
+                videoOutputContainer: persisted($localVideoOutputContainer) {
+                    AppSettings.localVideoOutputContainer = $0
+                },
+                videoCodec: persisted($localVideoCodec) { AppSettings.localVideoCodec = $0 }
+            )
+                .tabItem {
+                    Label("Local Media", systemImage: "folder.badge.gearshape")
+                }
+
             DroneSettingsTab(
                 compressedSuffix: persisted($droneCompressedSuffix) { AppSettings.droneCompressedSuffix = $0 },
                 rawDirectoryName: persisted($droneRawDirectoryName) { AppSettings.droneRawDirectoryName = $0 },
@@ -58,22 +74,6 @@ struct SettingsView: View {
             .tabItem {
                 Label("Drone", systemImage: "airplane")
             }
-
-            LocalPhotosSettingsTab(
-                extensions: persisted($localMediaExtensions) { AppSettings.localMediaExtensions = $0 },
-                convertHEIC: persisted($convertHEIC) { AppSettings.localConvertHEIC = $0 },
-                convertLegacyVideos: persisted($convertLegacyVideos) { AppSettings.localConvertLegacyVideos = $0 },
-                keepOriginalsAfterConversion: persisted($keepOriginalsAfterConversion) {
-                    AppSettings.localKeepOriginalsAfterConversion = $0
-                },
-                videoOutputContainer: persisted($localVideoOutputContainer) {
-                    AppSettings.localVideoOutputContainer = $0
-                },
-                videoCodec: persisted($localVideoCodec) { AppSettings.localVideoCodec = $0 }
-            )
-                .tabItem {
-                    Label("Local Media", systemImage: "folder.badge.gearshape")
-                }
         }
         .frame(width: 520, height: 640)
         .onAppear {

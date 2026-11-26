@@ -55,6 +55,8 @@
 		A00100000000000000000014 /* HandBrakeCompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000014 /* HandBrakeCompressor.swift */; };
 		A00100000000000000000015 /* DroneMediaPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000015 /* DroneMediaPaths.swift */; };
 		A00100000000000000000016 /* DroneProjectValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000016 /* DroneProjectValidator.swift */; };
+		A00200000000000000000A01 /* ExternalDriveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000A01 /* ExternalDriveModels.swift */; };
+		A00100000000000000000A02 /* ExternalDriveClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000A02 /* ExternalDriveClassifier.swift */; };
 		A00200000000000000000001 /* FileDateRepairModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000001 /* FileDateRepairModels.swift */; };
 		A00200000000000000000002 /* FileDateRepairService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000002 /* FileDateRepairService.swift */; };
 		A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000003 /* FileDateRepairModeView.swift */; };
@@ -116,6 +118,8 @@
 		B00100000000000000000014 /* HandBrakeCompressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandBrakeCompressor.swift; sourceTree = "<group>"; };
 		B00100000000000000000015 /* DroneMediaPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneMediaPaths.swift; sourceTree = "<group>"; };
 		B00100000000000000000016 /* DroneProjectValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneProjectValidator.swift; sourceTree = "<group>"; };
+		B00200000000000000000A01 /* ExternalDriveModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveModels.swift; sourceTree = "<group>"; };
+		B00100000000000000000A02 /* ExternalDriveClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalDriveClassifier.swift; sourceTree = "<group>"; };
 		B00200000000000000000001 /* FileDateRepairModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModels.swift; sourceTree = "<group>"; };
 		B00200000000000000000002 /* FileDateRepairService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairService.swift; sourceTree = "<group>"; };
 		B00200000000000000000003 /* FileDateRepairModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDateRepairModeView.swift; sourceTree = "<group>"; };
@@ -162,6 +166,7 @@
 				A1B2C3D4E5F6478990ABCDEF0 /* ThumbnailDisplayMode.swift */,
 				B00100000000000000000002 /* AppRoute.swift */,
 				B00100000000000000000010 /* DroneStepModels.swift */,
+				B00200000000000000000A01 /* ExternalDriveModels.swift */,
 				B00200000000000000000001 /* FileDateRepairModels.swift */,
 			);
 			path = Models;
@@ -205,6 +210,7 @@
 				B00100000000000000000001 /* AppBranding.swift */,
 				B00100000000000000000004 /* DroneFinalizePlan.swift */,
 				B00100000000000000000015 /* DroneMediaPaths.swift */,
+				B00100000000000000000A02 /* ExternalDriveClassifier.swift */,
 				B00100000000000000000016 /* DroneProjectValidator.swift */,
 			);
 			path = Utilities;
@@ -372,6 +378,8 @@
 				A0010000000000000000000A /* PhotosModeView.swift in Sources */,
 				A0010000000000000000000B /* DroneModeView.swift in Sources */,
 				A00100000000000000000017 /* DroneFinalizeViews.swift in Sources */,
+				A00200000000000000000A01 /* ExternalDriveModels.swift in Sources */,
+				A00100000000000000000A02 /* ExternalDriveClassifier.swift in Sources */,
 				A00200000000000000000001 /* FileDateRepairModels.swift in Sources */,
 				A00200000000000000000002 /* FileDateRepairService.swift in Sources */,
 				A00200000000000000000003 /* FileDateRepairModeView.swift in Sources */,

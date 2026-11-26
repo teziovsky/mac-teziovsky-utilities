@@ -16,32 +16,29 @@ extension LocalPhotosService {
         replacementSummary = LocalMediaReplacementSummary(total: plannedPairs.count)
         replacementProgress = FileDateRepairProgress(total: plannedPairs.count)
         let replacer = makeReplacer()
-        let operationID = UUID()
-        self.operationID = operationID
 
-        operationTask = Task { [weak self] in
+        startOperation(finish: { [weak self] in self?.isReplacing = false }, work: { [weak self] operationID in
             guard let self else { return }
             let didAccess = directory.startAccessingSecurityScopedResource()
             defer {
                 if didAccess { directory.stopAccessingSecurityScopedResource() }
-                if self.operationID == operationID {
-                    isReplacing = false
-                    operationTask = nil
-                    self.operationID = nil
-                }
             }
 
             let run = await replace(plannedPairs, with: replacer, operationID: operationID)
-            guard self.operationID == operationID else { return }
+            guard isCurrentOperation(operationID) else { return }
             replacementSummary = run.summary
             // Without a full rescan, at least the pairs already in the Trash leave the list.
             if run.wasCancelled {
                 removeReplaceablePairs(run.handledPaths)
             } else if await !rescanAfterReplacement(in: directory, operationID: operationID),
-                      self.operationID == operationID {
+                      isCurrentOperation(operationID) {
                 removeReplaceablePairs(run.handledPaths)
             }
-        }
+            // A cancel that arrived after the last pair (e.g. during the rescan) cancelled nothing.
+            if isCurrentOperation(operationID), run.summary.cancelled == 0 {
+                clearCancellationMessage()
+            }
+        })
     }
 
     private struct ReplacementRun {
@@ -58,7 +55,7 @@ extension LocalPhotosService {
     ) async -> ReplacementRun {
         var run = ReplacementRun(summary: LocalMediaReplacementSummary(total: pairs.count))
         for (index, pair) in pairs.enumerated() {
-            guard !Task.isCancelled, self.operationID == operationID else {
+            guard !Task.isCancelled, isCurrentOperation(operationID) else {
                 run.summary.cancelled += pairs.count - index
                 run.wasCancelled = true
                 return run
@@ -82,7 +79,7 @@ extension LocalPhotosService {
             case .cancelled:
                 run.summary.cancelled += 1
             }
-            guard self.operationID == operationID else { return run }
+            guard isCurrentOperation(operationID) else { return run }
             replacementProgress.processed = index + 1
             replacementSummary = run.summary
         }
@@ -107,13 +104,13 @@ extension LocalPhotosService {
                 conversionConfig: AppSettings.localMediaConversionConfig,
                 progress: { _ in }
             )
-            guard self.operationID == operationID else { return false }
+            guard isCurrentOperation(operationID) else { return false }
             applyRefreshedScan(refreshed)
             return true
         } catch is CancellationError {
             return false
         } catch {
-            guard self.operationID == operationID else { return false }
+            guard isCurrentOperation(operationID) else { return false }
             appendFailure(FileDateRepairFailure(
                 relativePath: directory.lastPathComponent,
                 message: "Originals were replaced, but previews could not refresh: \(error.localizedDescription)"

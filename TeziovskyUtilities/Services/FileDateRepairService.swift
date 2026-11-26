@@ -460,17 +460,16 @@ final class LocalPhotosService: ObservableObject {
     @Published private(set) var cancellationMessage: String?
     @Published var chunkSize = 100
 
-    // Replacing originals with converted copies; the run lives in LocalMediaReplacementRun.swift,
-    // which is why these setters are internal.
+    // Replacing originals with converted copies. The run lives in LocalMediaReplacementRun.swift
+    // and writes these three, which is why their setters are internal.
     @Published var isReplacing = false
     @Published var replacementProgress = FileDateRepairProgress()
     @Published var replacementSummary: LocalMediaReplacementSummary?
     /// Builds the replacer for each run; tests swap in a fake Trash and verification.
     var makeReplacer: () -> LocalMediaReplacer = { LocalMediaReplacer() }
 
-    // Internal so extensions in other files can run operations the same way.
-    var operationTask: Task<Void, Never>?
-    var operationID: UUID?
+    private var operationTask: Task<Void, Never>?
+    private var operationID: UUID?
 
     var isRunning: Bool { isScanning || isConverting || isRepairing || isOrganizing || isReplacing }
 
@@ -504,6 +503,7 @@ final class LocalPhotosService: ObservableObject {
 
     func scan(directory: URL) {
         cancel()
+        clearSupersededRunFlags()
         if directory.standardizedFileURL != self.directory?.standardizedFileURL {
             excludedPaths = [:]
         }
@@ -820,6 +820,7 @@ extension LocalPhotosService {
         guard !isRunning, !plannedItems.isEmpty, let directory else { return }
         isConverting = true
         cancellationMessage = nil
+        replacementSummary = nil
         conversionSummary = LocalMediaConversionSummary(total: plannedItems.count)
         conversionProgress = FileDateRepairProgress(total: plannedItems.count)
         let operationID = UUID()
@@ -889,16 +890,9 @@ extension LocalPhotosService {
                     progress: { _ in }
                 )
                 guard self.operationID == operationID else { return }
-                conversionItems = refreshed.conversionItems.filter {
-                    !convertedKeptSources.contains($0.sourceRelativePath)
-                }
-                items = refreshed.items
-                organizationItems = refreshed.organizationItems
-                organizationSkippedCount = refreshed.organizationSkippedCount
-                keptItems = refreshed.keptItems
-                replaceablePairs = refreshed.replaceablePairs
-                failures = conversionFailures + refreshed.failures
-                scannedFileCount = refreshed.scannedFileCount
+                applyRefreshedScan(refreshed)
+                conversionItems.removeAll { convertedKeptSources.contains($0.sourceRelativePath) }
+                failures = conversionFailures + failures
             } catch is CancellationError {
                 summary.wasCancelled = true
             } catch {
@@ -1091,6 +1085,35 @@ extension LocalPhotosService {
 
 /// Helpers for operations defined in other files (LocalMediaReplacementRun.swift).
 extension LocalPhotosService {
+    /// Starts `work` as the current operation, superseding any earlier one. `finish` runs when
+    /// it ends, unless a newer operation took over meanwhile.
+    func startOperation(
+        finish: @escaping @MainActor () -> Void,
+        work: @escaping @MainActor (UUID) async -> Void
+    ) {
+        let operationID = UUID()
+        self.operationID = operationID
+        operationTask = Task { [weak self] in
+            await work(operationID)
+            guard let self, self.operationID == operationID else { return }
+            finish()
+            operationTask = nil
+            self.operationID = nil
+        }
+    }
+
+    func isCurrentOperation(_ operationID: UUID) -> Bool {
+        self.operationID == operationID
+    }
+
+    /// A new scan supersedes the running operation, whose own cleanup then no longer runs.
+    fileprivate func clearSupersededRunFlags() {
+        isConverting = false
+        isRepairing = false
+        isOrganizing = false
+        isReplacing = false
+    }
+
     /// Takes every list from a fresh scan, as after converting.
     func applyRefreshedScan(_ refreshed: FileDateScanResult) {
         conversionItems = refreshed.conversionItems

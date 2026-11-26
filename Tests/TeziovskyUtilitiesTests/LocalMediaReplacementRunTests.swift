@@ -21,6 +21,13 @@ private final class FolderTrash: @unchecked Sendable {
     }
 }
 
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.withLock { flag } }
+    func set(_ newValue: Bool) { lock.withLock { flag = newValue } }
+}
+
 private struct BrokenCopy: LocalizedError {
     var errorDescription: String? { "The copy is broken" }
 }
@@ -148,6 +155,61 @@ final class LocalMediaReplacementRunTests: XCTestCase {
             "The replaced pair leaves the list even without a rescan"
         )
         XCTAssertTrue(service.cancellationMessage?.contains("Replacement cancelled") == true)
+    }
+
+    func testCancelAfterEveryPairWasProcessedShowsNoCancellation() async throws {
+        try writePair("A.mp4", copy: "A-converted.mp4")
+        for index in 0..<100 {
+            try Data([1]).write(to: root.appendingPathComponent("filler-\(index).mp4"))
+        }
+        let service = LocalPhotosService()
+        let trash = trash!
+        let cancelledWhileRunning = LockedFlag()
+        service.makeReplacer = {
+            LocalMediaReplacer(trash: { url in
+                try trash.trash(url)
+                // Arrives on the main actor once the last pair is done, during the rescan.
+                Task { @MainActor in
+                    cancelledWhileRunning.set(service.isReplacing)
+                    service.cancel()
+                }
+            }, verify: { _ in })
+        }
+        service.scan(directory: root)
+        try await waitUntilIdle(service)
+
+        service.replaceOriginals()
+        try await waitUntilIdle(service)
+
+        XCTAssertTrue(cancelledWhileRunning.value, "Cancel must reach the run while it is still busy")
+        let summary = try XCTUnwrap(service.replacementSummary)
+        XCTAssertEqual(summary.replaced, 1)
+        XCTAssertEqual(summary.cancelled, 0)
+        XCTAssertNil(service.cancellationMessage, "No pair was cancelled")
+        XCTAssertTrue(service.replaceablePairs.isEmpty)
+    }
+
+    func testNewScanSupersedesARunningReplacementWithoutStayingBusy() async throws {
+        try writePair("A.mp4", copy: "A-converted.mp4")
+        let service = LocalPhotosService()
+        let trash = trash!
+        service.makeReplacer = {
+            LocalMediaReplacer(trash: { try trash.trash($0) }, verify: { _ in
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            })
+        }
+        service.scan(directory: root)
+        try await waitUntilIdle(service)
+        service.replaceOriginals()
+        XCTAssertTrue(service.isReplacing)
+
+        service.scan(directory: root)
+        try await waitUntilIdle(service)
+
+        XCTAssertFalse(service.isReplacing)
+        XCTAssertFalse(service.isRunning)
+        XCTAssertNil(service.replacementSummary, "A new scan starts without the old summary")
+        XCTAssertEqual(service.replaceablePairs.count, 1)
     }
 
     // MARK: - Helpers

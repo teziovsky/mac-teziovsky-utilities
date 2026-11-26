@@ -463,6 +463,7 @@ private struct LocalMediaConversionPreviewCard: View {
                     .pillActionButton(prominent: true)
                     .keyboardShortcut(.defaultAction)
                     .help("Continue to the date preview (↩)")
+                    .disabled(service.isRunning)
             } else {
                 Button("Convert \(service.includedConversionItems.count) Files…") {
                     confirmsConversion = true

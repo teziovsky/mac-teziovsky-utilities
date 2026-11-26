@@ -311,6 +311,27 @@ enum LocalMediaOrganizer {
     }
 }
 
+/// Where the Local Photos workflow is: lives in the service so shortcuts can move it.
+enum LocalPhotosWorkflowStep: Int, CaseIterable {
+    case convert
+    case repair
+    case organize
+    case complete
+
+    var previous: LocalPhotosWorkflowStep? {
+        LocalPhotosWorkflowStep(rawValue: rawValue - 1)
+    }
+
+    var title: String {
+        switch self {
+        case .convert: return "Convert Media"
+        case .repair: return "Repair Dates"
+        case .organize: return "Organize Files"
+        case .complete: return "Summary"
+        }
+    }
+}
+
 /// The three reviewable steps of the Local Photos workflow; exclusions are kept per step.
 enum LocalMediaStep: Hashable, Sendable {
     case conversion
@@ -360,6 +381,8 @@ final class LocalPhotosService: ObservableObject {
 
     var isRunning: Bool { isScanning || isConverting || isRepairing || isOrganizing }
 
+    @Published var workflowStep: LocalPhotosWorkflowStep = .convert
+
     /// False after a cancelled or failed scan, so empty lists are not shown as "nothing to do".
     @Published private(set) var lastScanCompleted = false
     /// Files the user unticked, per step, keyed by relative path so the choice survives the
@@ -404,6 +427,7 @@ final class LocalPhotosService: ObservableObject {
             excludedPaths = [:]
         }
         resetResults()
+        workflowStep = .convert
         self.directory = directory
         isScanning = true
         cancellationMessage = nil
@@ -535,6 +559,7 @@ final class LocalPhotosService: ObservableObject {
                     isOrganizing = false
                     operationTask = nil
                     self.operationID = nil
+                    workflowStep = .complete
                 }
             }
 
@@ -631,12 +656,9 @@ final class LocalPhotosService: ObservableObject {
         attemptedIDs = attemptedIDs.intersection(Set(items.map(\.id)))
     }
 
-    func failureMessage(for itemID: String) -> String? {
-        failures.last(where: { $0.relativePath == itemID })?.message
-    }
-
     func reset() {
         cancel()
+        workflowStep = .convert
         directory = nil
         resetResults()
         cancellationMessage = nil
@@ -684,6 +706,7 @@ extension LocalPhotosService {
                     isConverting = false
                     operationTask = nil
                     self.operationID = nil
+                    workflowStep = .repair
                 }
             }
 
@@ -892,5 +915,20 @@ enum FileDateRepairExecutor {
             modified: modified,
             to: fileURL
         )
+    }
+}
+
+extension LocalPhotosService {
+    func failureMessage(for itemID: String) -> String? {
+        failures.last(where: { $0.relativePath == itemID })?.message
+    }
+
+    /// What is running, for "blocked while …" banners; nil when idle.
+    var activityTitle: String? {
+        if isScanning { return "Scanning" }
+        if isConverting { return "Converting media" }
+        if isRepairing { return "Repairing dates" }
+        if isOrganizing { return "Organizing files" }
+        return nil
     }
 }

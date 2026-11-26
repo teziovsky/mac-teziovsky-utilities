@@ -98,21 +98,6 @@ extension View {
     }
 }
 
-extension View {
-    /// Runs `action` when Escape is pressed anywhere in the view's window.
-    ///
-    /// Uses a hidden `.cancelAction` button (registered as a window key-equivalent) which is
-    /// far more reliable than `onExitCommand`, that only fires when the view is first responder.
-    func onEscape(perform action: @escaping () -> Void) -> some View {
-        background(
-            Button("Back", action: action)
-                .keyboardShortcut(.cancelAction)
-                .hidden()
-                .accessibilityHidden(true)
-        )
-    }
-}
-
 /// A content card rendered with a Liquid Glass surface, matching the app's glass look.
 struct GlassCard<Content: View>: View {
     var title: String?

@@ -922,13 +922,11 @@ struct DroneDoneStepView: View {
                         }
                         .pillActionButton()
                         .help("Reveal the project folder in Finder (⇧⌘R)")
-                        .keyboardShortcut("r", modifiers: [.command, .shift])
                     }
                     Spacer()
                     Button("Choose Another Folder", action: onChooseAnother)
                         .pillActionButton(prominent: true)
                         .help("Choose another project folder (⌘O)")
-                        .keyboardShortcut("o", modifiers: .command)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

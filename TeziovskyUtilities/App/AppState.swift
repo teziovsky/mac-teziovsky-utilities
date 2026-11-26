@@ -21,6 +21,14 @@ final class AppState: ObservableObject {
     private var sidebarSelectionTask: Task<Void, Never>?
 
     @Published var route: AppRoute = .home
+    /// Banner explaining why a shortcut or button could not run right now.
+    @Published var notice: AppNotice?
+    var playsAlertSound = true
+    /// True while a sheet, dialog, panel or another window is in front of the main window.
+    var isPresentingModalUI: () -> Bool = { false }
+    /// The app's main window, captured by `RootView`; used to tell it apart from sheets,
+    /// panels and the Settings window.
+    weak var mainWindow: NSWindow?
     @Published var hasDismissedPermissionsOnboarding = false
     @Published var selectedAlbum: PhotoAlbum?
     @Published var mediaItems: [MediaItem] = []
@@ -39,6 +47,7 @@ final class AppState: ObservableObject {
     }
 
     init() {
+        isPresentingModalUI = { [weak self] in self?.modalUIIsPresented() ?? false }
         photosService.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -376,18 +385,6 @@ extension AppState {
 }
 
 extension AppState {
-    var photosCommands: PhotosCommandState {
-        PhotosCommandState(
-            route: route,
-            hasSelectedAlbum: selectedAlbum != nil,
-            hasSelectedMedia: selectedMediaID != nil,
-            hasMedia: !mediaItems.isEmpty,
-            canOrganizeSelectedAlbum: canOrganizeSelectedAlbum,
-            isOrganizing: organizeExporter.isRunning,
-            isLoadingAlbums: photosService.isLoadingAlbums
-        )
-    }
-
     /// Sidebar selection (click or arrow keys): the highlight moves at once, the album loads
     /// once the selection settles, so arrowing through large albums does not load each one.
     func selectAlbumFromSidebar(_ album: PhotoAlbum?) {

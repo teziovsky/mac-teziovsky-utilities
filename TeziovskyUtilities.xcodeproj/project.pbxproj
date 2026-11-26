@@ -7,6 +7,7 @@
 
 /* Begin PBXBuildFile section */
 		9C795D2769CD4500B193EF0C /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BF803B324DB4B12919B1402 /* AppState.swift */; };
+		0231597251DC4E3B9B4ACF26 /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A88A23AAD35C4F41857D6B37 /* AppCommands.swift */; };
 		13420944E3E4445E8A034E05 /* TeziovskyUtilitiesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */; };
 		166D2A828251492495D9CF73 /* MediaItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C7A00AAFB3B4075B2D47ED5 /* MediaItem.swift */; };
 		16B4F10D882242B684686880 /* OrganizeProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530AEEFA19934A4FA829453C /* OrganizeProgress.swift */; };
@@ -25,7 +26,6 @@
 		AABBCCDDEEFF001122334455 /* SleepAssertion.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCCDDEEFF00112233445566 /* SleepAssertion.swift */; };
 		E196206AD6D64E458CF84E2F /* AlbumSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A80FE1B411B441C8CEB3CD8 /* AlbumSidebarView.swift */; };
 		C3D4E5F6A7B84990A1B2C3D4 /* MainWindowKeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7498091A2B3C4 /* MainWindowKeyboardShortcuts.swift */; };
-		E3F4A5B6C7D84990A1B2C3D5 /* AlbumNumberKeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A5B6C7D8E94901A2B3C4D6 /* AlbumNumberKeyboardShortcuts.swift */; };
 		FDA1FFB081CD4AF180526F7A /* MediaGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8542DD10E74489281F31F8C /* MediaGridView.swift */; };
 		38F287CD62414D72A3E35796 /* OrganizeProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE88D550AA147A2A10449DB /* OrganizeProgressView.swift */; };
 		7ECD01CA2B604C1290A9B7DA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E58F090FFBE4CD68111AA5E /* SettingsView.swift */; };
@@ -67,6 +67,7 @@
 		8CFB453D98264CF289BB3BBF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CCEC6AF34D2A457CA48F3ED4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		7BF803B324DB4B12919B1402 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A88A23AAD35C4F41857D6B37 /* AppCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommands.swift; sourceTree = "<group>"; };
 		4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeziovskyUtilitiesApp.swift; sourceTree = "<group>"; };
 		6C7A00AAFB3B4075B2D47ED5 /* MediaItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItem.swift; sourceTree = "<group>"; };
 		530AEEFA19934A4FA829453C /* OrganizeProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizeProgress.swift; sourceTree = "<group>"; };
@@ -85,7 +86,6 @@
 		BBCCDDEEFF00112233445566 /* SleepAssertion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepAssertion.swift; sourceTree = "<group>"; };
 		7A80FE1B411B441C8CEB3CD8 /* AlbumSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSidebarView.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7498091A2B3C4 /* MainWindowKeyboardShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowKeyboardShortcuts.swift; sourceTree = "<group>"; };
-		F4A5B6C7D8E94901A2B3C4D6 /* AlbumNumberKeyboardShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumNumberKeyboardShortcuts.swift; sourceTree = "<group>"; };
 		C8542DD10E74489281F31F8C /* MediaGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaGridView.swift; sourceTree = "<group>"; };
 		CCE88D550AA147A2A10449DB /* OrganizeProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizeProgressView.swift; sourceTree = "<group>"; };
 		0E58F090FFBE4CD68111AA5E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -145,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				7BF803B324DB4B12919B1402 /* AppState.swift */,
+				A88A23AAD35C4F41857D6B37 /* AppCommands.swift */,
 				4B67B14C17024B3E8407CCCE /* TeziovskyUtilitiesApp.swift */,
 			);
 			path = App;
@@ -211,7 +212,6 @@
 			children = (
 				7A80FE1B411B441C8CEB3CD8 /* AlbumSidebarView.swift */,
 				B2C3D4E5F6A7498091A2B3C4 /* MainWindowKeyboardShortcuts.swift */,
-				F4A5B6C7D8E94901A2B3C4D6 /* AlbumNumberKeyboardShortcuts.swift */,
 				C8542DD10E74489281F31F8C /* MediaGridView.swift */,
 				CCE88D550AA147A2A10449DB /* OrganizeProgressView.swift */,
 				0E58F090FFBE4CD68111AA5E /* SettingsView.swift */,
@@ -321,6 +321,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9C795D2769CD4500B193EF0C /* AppState.swift in Sources */,
+				0231597251DC4E3B9B4ACF26 /* AppCommands.swift in Sources */,
 				13420944E3E4445E8A034E05 /* TeziovskyUtilitiesApp.swift in Sources */,
 				166D2A828251492495D9CF73 /* MediaItem.swift in Sources */,
 				16B4F10D882242B684686880 /* OrganizeProgress.swift in Sources */,
@@ -339,7 +340,6 @@
 				AABBCCDDEEFF001122334455 /* SleepAssertion.swift in Sources */,
 				E196206AD6D64E458CF84E2F /* AlbumSidebarView.swift in Sources */,
 				C3D4E5F6A7B84990A1B2C3D4 /* MainWindowKeyboardShortcuts.swift in Sources */,
-				E3F4A5B6C7D84990A1B2C3D5 /* AlbumNumberKeyboardShortcuts.swift in Sources */,
 				FDA1FFB081CD4AF180526F7A /* MediaGridView.swift in Sources */,
 				38F287CD62414D72A3E35796 /* OrganizeProgressView.swift in Sources */,
 				7ECD01CA2B604C1290A9B7DA /* SettingsView.swift in Sources */,

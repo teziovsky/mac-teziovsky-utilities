@@ -24,44 +24,41 @@ struct PhotosModeView: View {
                 )
             }
         }
-        .onEscape(perform: handleEscape)
         .navigationTitle(mainToolbarTitle)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
-                    appState.goHome()
+                    appState.run(.home)
                 } label: {
                     Label("Home", systemImage: "house")
                 }
-                .help("Back to the home screen")
+                .help("Back to the home screen (⇧⌘H)")
             }
 
             albumNavigationHeader
             if appState.selectedAlbum != nil {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
-                        appState.decreaseMediaGridColumnCount()
+                        appState.run(.largerThumbnails)
                     } label: {
                         Label("Larger Thumbnails", systemImage: "plus")
                     }
                     .help("Fewer columns, larger thumbnails (⌘+)")
-                    .keyboardShortcut("+", modifiers: .command)
                     .disabled(!appState.canDecreaseMediaGridColumnCount)
 
                     Button {
-                        appState.increaseMediaGridColumnCount()
+                        appState.run(.smallerThumbnails)
                     } label: {
                         Label("Smaller Thumbnails", systemImage: "minus")
                     }
                     .help("More columns, smaller thumbnails (⌘−)")
-                    .keyboardShortcut("-", modifiers: .command)
                     .disabled(!appState.canIncreaseMediaGridColumnCount)
                 }
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    appState.toggleThumbnailDisplayMode()
+                    appState.run(.toggleThumbnails)
                 } label: {
                     Label(
                         appState.thumbnailDisplayMode.toolbarLabel,
@@ -69,23 +66,21 @@ struct PhotosModeView: View {
                     )
                 }
                 .help("Toggle square cropped or full aspect ratio thumbnails (⌘T)")
-                .keyboardShortcut("t", modifiers: .command)
                 .disabled(appState.selectedAlbum == nil)
 
                 Button {
-                    Task { await appState.photosService.reloadAlbums() }
+                    appState.run(.refresh)
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .help("Reload albums from Photos (⌘R)")
-                .keyboardShortcut("r", modifiers: .command)
                 .disabled(appState.photosService.isLoadingAlbums)
             }
 
             if appState.selectedAlbum != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Organize") {
-                        appState.promptExportDirectoryAndOrganize()
+                        appState.run(.organize)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(
@@ -93,7 +88,6 @@ struct PhotosModeView: View {
                             || appState.organizeExporter.isRunning
                             || !appState.canOrganizeSelectedAlbum
                     )
-                    .keyboardShortcut("e", modifiers: .command)
                     .help(organizeHelp)
                 }
             }
@@ -109,12 +103,6 @@ struct PhotosModeView: View {
         } message: {
             if let error = appState.quickLookError {
                 Text(error)
-            }
-        }
-        .background {
-            MainWindowKeyboardShortcuts()
-            if appState.selectedAlbum == nil {
-                AlbumNumberKeyboardShortcuts()
             }
         }
     }
@@ -181,13 +169,5 @@ struct PhotosModeView: View {
             get: { appState.quickLookError != nil },
             set: { if !$0 { appState.quickLookError = nil } }
         )
-    }
-
-    private func handleEscape() {
-        if QuickLookHelper.isPanelVisible {
-            QuickLookHelper.closePreview()
-            return
-        }
-        appState.photosEscapeBack()
     }
 }

@@ -38,42 +38,35 @@ struct DroneModeView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
-                    workflow.reset()
-                    appState.goHome()
+                    appState.run(.home)
                 } label: {
                     Label("Home", systemImage: "house")
                 }
                 .help("Back to the home screen (⇧⌘H)")
-                .keyboardShortcut("h", modifiers: [.command, .shift])
-                .disabled(isBusy)
             }
 
             ToolbarItem(placement: .navigation) {
                 Button {
-                    workflow.goBack()
+                    appState.run(.back)
                 } label: {
                     Label("Go Back", systemImage: "chevron.backward")
                 }
                 .help("Go back one step (⌘[ or Esc). Never changes files.")
-                .keyboardShortcut("[", modifiers: .command)
                 .disabled(!workflow.canGoBack || isBusy)
             }
 
             if workflow.canUndoFinalizeStep {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        workflow.undoLastFinalizeStep()
+                        appState.run(.undoFinalizeStep)
                     } label: {
                         Label("Undo Last Step", systemImage: "arrow.uturn.backward")
                     }
                     .help("Revert the last finalize step: restore trashed files and undo renames (⌥⌘Z)")
-                    // Not ⌘Z: that belongs to Edit → Undo, which text fields also use.
-                    .keyboardShortcut("z", modifiers: [.command, .option])
                     .disabled(isBusy)
                 }
             }
         }
-        .onEscape(perform: handleEscape)
         .confirmationDialog(
             pendingDestructiveStep.map { "\($0.actionTitle)?" } ?? "",
             isPresented: Binding(
@@ -141,12 +134,10 @@ struct DroneModeView: View {
                         .truncationMode(.middle)
                 }
                 Button(workflow.hasProject ? "Change" : "Choose") {
-                    chooseFolder()
+                    appState.run(.openFolder)
                 }
                 .pillActionButton()
                 .help("Choose the drone project folder (⌘O)")
-                .keyboardShortcut("o", modifiers: .command)
-                .disabled(isBusy)
             }
         }
     }
@@ -204,7 +195,7 @@ struct DroneModeView: View {
             DroneDoneStepView(
                 projectPath: workflow.projectDirectoryPath,
                 config: config,
-                onChooseAnother: { chooseFolder() }
+                onChooseAnother: { appState.run(.openFolder) }
             )
         }
     }
@@ -239,31 +230,8 @@ struct DroneModeView: View {
             DroneDoneStepView(
                 projectPath: workflow.projectDirectoryPath,
                 config: config,
-                onChooseAnother: { chooseFolder() }
+                onChooseAnother: { appState.run(.openFolder) }
             )
-        }
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
-        panel.message = "Select the drone project folder."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        workflow.loadProject(projectDirectory: url, config: config)
-    }
-
-    /// Esc only navigates. It never undoes a finalize step and never leaves a project that
-    /// already has changes; both need an explicit button.
-    private func handleEscape() {
-        guard !isBusy, pendingDestructiveStep == nil else { return }
-        if workflow.canGoBack {
-            workflow.goBack()
-        } else if workflow.phase == .validateLayout {
-            workflow.reset()
-            appState.goHome()
         }
     }
 

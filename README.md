@@ -18,8 +18,8 @@ Native macOS app for organizing media. From a home screen you pick a workflow:
 - Files are written byte-for-byte as stored in Photos (no re-encoding, no metadata rewrite); only Finder Created/Modified are set, from the file's own EXIF capture time
 - Edited photos export their edited render by default; turn this off in Settings → Photos to export unmodified originals
 - Live Photo motion (`.MOV`) and RAW alternates are saved next to the photo with the same base name (Settings → Photos)
-- Quick Look preview for the selected item (Space toggles it, ⌘Y, or double-click)
-- Videos show their duration; the sidebar toggles with ⌘S and thumbnails resize with ⌘+/⌘= and ⌘−
+- Quick Look preview for the selected item (Space or ⌘Y toggles it, or double-click)
+- Videos show their duration
 
 ### Organize Local Photos
 
@@ -39,9 +39,33 @@ Point the app at a project folder that contains a `raw/` and an `export/` subfol
 2. Move the remaining images and videos from `export/` up into the project folder (keeping `vertical/` / `horizontal/` unless disabled in Settings).
 3. Move `export/` to the Trash once it is empty, and `raw/` only if "Keep raw/ after finalize" is off (it is kept by default). Files that are not part of the delivery (e.g. `.drp`, `.srt`, naming conflicts) are listed in the preview and left in `export/`, which is then kept.
 
-A preview lists every planned action before anything is changed, destructive steps ask for confirmation, and each step can be reverted with **Undo Last Step** (⌥⌘Z). Esc and Go Back only navigate; they never change files.
+A preview lists every planned action before anything is changed, destructive steps ask for confirmation, and each step can be reverted with **Undo Last Step** (⌥⌘Z). Esc and Go Back (⌘[) only navigate; they never change files.
 
 Compression runs HandBrakeCLI with per-file progress and ETA. Output is written to a hidden `.partial` file and only renamed after HandBrakeCLI succeeds, so a failed, cancelled or interrupted encode never looks like a finished compressed copy. Cancel stops the running encode, and the Mac is kept awake while compressing.
+
+### Keyboard shortcuts
+
+Every workflow uses the same shortcuts, all listed in the menu bar. When a shortcut can't run right now — work is in progress, a dialog is open, or it belongs to another workflow — a banner at the bottom of the window says why instead of the key doing nothing.
+
+| Shortcut | Command | Export iCloud Photos | Organize Local Photos | Organize Drone Footage |
+|----------|---------|----------------------|-----------------------|------------------------|
+| ⇧⌘H | Go → Home | ✓ | ✓ (scan results are discarded) | ✓ |
+| ⌘[ / Esc | Go → Back one level | photo → album → home; closes Quick Look | previous step; leaves from the first step only before a scan | previous step; never changes files |
+| ⌘O | File → Open … Folder | — (folder is chosen when organizing) | choose & scan a media folder | choose a project folder |
+| ⇧⌘R | File → Reveal in Finder | export folder | media folder | project folder |
+| ⌘R | View → Refresh | reload albums | rescan the folder | re-check the current step |
+| ↩ | Primary action of the current step | — | continue / convert… / organize… (confirmed first) | continue / run step (destructive steps confirmed first) |
+| ⌥⌘Z | Edit → Undo Last Finalize Step | — | — | ✓ |
+| ⌘S | View → Toggle Sidebar | ✓ | — | — |
+| ⌘T | View → Toggle Thumbnail Display | ✓ | — | — |
+| ⌘+ / ⌘= and ⌘− | View → Larger / Smaller Thumbnails | ✓ | — | — |
+| Space / ⌘Y | View → Quick Look | ✓ | — | — |
+| ⌘E | View → Organize Album… | ✓ | — | — |
+| ⌘1…⌘9 | Albums → album 1–9 | ✓ | — | — |
+| ⌘↓ / ⌘↑ | Albums → Next / Previous Album | ✓ | — | — |
+| ←↑↓→ | Move the selection in the grid | ✓ | — | — |
+
+Home and Back are blocked while work that must finish (or be cancelled with its Cancel button) is running: organizing an album, scanning/converting/repairing/organizing local media, HandBrake compression, or a finalize step.
 
 ### First launch
 

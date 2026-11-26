@@ -106,6 +106,25 @@ final class DroneWorkflowCoordinator: ObservableObject {
         refreshExportScan()
     }
 
+    /// Steps whose content comes from the disk or HandBrake and can be re-read.
+    var canRefreshCurrentStep: Bool {
+        hasProject && [.validateLayout, .scanExport, .pickPreset].contains(phase)
+    }
+
+    func refreshCurrentStep() {
+        guard let projectDirectory, canRefreshCurrentStep else { return }
+        switch phase {
+        case .validateLayout:
+            loadProject(projectDirectory: projectDirectory, config: config)
+        case .scanExport:
+            refreshExportScan()
+        case .pickPreset:
+            presetLoader.load(config: config)
+        default:
+            break
+        }
+    }
+
     func refreshExportScan() {
         guard let projectDirectory else { return }
         let didAccess = projectDirectory.startAccessingSecurityScopedResource()

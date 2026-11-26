@@ -22,9 +22,6 @@ struct MediaGridView: View {
                       appState.selectedMediaID != nil else { return }
                 isGridFocused = true
             }
-            .background {
-                AlbumNumberKeyboardShortcuts()
-            }
     }
 
     @ViewBuilder
@@ -79,17 +76,9 @@ struct MediaGridView: View {
                         appState.moveMediaSelection(.down)
                         return .handled
                     }
-                    .onKeyPress(.escape) {
-                        appState.photosEscapeBack()
-                        return .handled
-                    }
                     .onKeyPress(.space) {
-                        // Space toggles Quick Look, as in Finder and Photos.
-                        if QuickLookHelper.isPanelVisible {
-                            QuickLookHelper.closePreview()
-                        } else {
-                            Task { await appState.previewSelectedMedia() }
-                        }
+                        // Space toggles Quick Look, as in Finder and Photos (same as ⌘Y).
+                        appState.run(.quickLook)
                         return .handled
                     }
                     .onChange(of: appState.selectedMediaID) { _, newID in

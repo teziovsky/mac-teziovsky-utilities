@@ -1,25 +1,8 @@
 import AppKit
 import SwiftUI
 
-private enum LocalPhotosWorkflowStep: Int, CaseIterable {
-    case convert
-    case repair
-    case organize
-    case complete
-
-    var title: String {
-        switch self {
-        case .convert: return "Convert Media"
-        case .repair: return "Repair Dates"
-        case .organize: return "Organize Files"
-        case .complete: return "Summary"
-        }
-    }
-}
-
 struct LocalPhotosModeView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var step: LocalPhotosWorkflowStep = .convert
     @State private var filter = ""
 
     @ObservedObject var service: LocalPhotosService
@@ -35,7 +18,7 @@ struct LocalPhotosModeView: View {
                 if service.directory != nil, !service.isScanning {
                     if service.lastScanCompleted {
                         workflowSteps
-                        switch step {
+                        switch service.workflowStep {
                         case .convert:
                             conversionCard
                         case .repair:
@@ -66,38 +49,16 @@ struct LocalPhotosModeView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
-                    service.reset()
-                    appState.goHome()
+                    appState.run(.home)
                 } label: {
                     Label("Home", systemImage: "house")
                 }
                 .help("Back to the home screen (⇧⌘H)")
-                .keyboardShortcut("h", modifiers: [.command, .shift])
-                .disabled(service.isRunning)
-            }
-        }
-        .onEscape {
-            // Esc cancels work in progress, but never silently discards finished scan results;
-            // leaving with results requires the explicit Home button.
-            if service.isRunning {
-                service.cancel()
-            } else if service.directory == nil {
-                appState.goHome()
             }
         }
         .onDisappear {
             if !service.isRunning {
                 service.reset()
-            }
-        }
-        .onChange(of: service.isOrganizing) { wasOrganizing, isOrganizing in
-            if wasOrganizing, !isOrganizing, service.organizationSummary != nil {
-                step = .complete
-            }
-        }
-        .onChange(of: service.isConverting) { wasConverting, isConverting in
-            if wasConverting, !isConverting, service.conversionSummary != nil {
-                step = .repair
             }
         }
     }
@@ -138,11 +99,10 @@ struct LocalPhotosModeView: View {
                 }
                 Spacer(minLength: 12)
                 Button(service.directory == nil ? "Choose & Scan" : "Change & Rescan") {
-                    chooseFolder()
+                    appState.run(.openFolder)
                 }
                 .pillActionButton(prominent: service.directory == nil)
-                .keyboardShortcut("o", modifiers: .command)
-                .disabled(service.isRunning)
+                .help("Choose a media folder and scan it (⌘O)")
             }
         }
     }
@@ -191,18 +151,16 @@ struct LocalPhotosModeView: View {
     private var workflowSteps: some View {
         HStack(spacing: 10) {
             ForEach(LocalPhotosWorkflowStep.allCases, id: \.rawValue) { item in
+                let isReached = item.rawValue <= service.workflowStep.rawValue
                 HStack(spacing: 7) {
                     Text("\(item.rawValue + 1)")
                         .font(.caption.bold())
                         .frame(width: 22, height: 22)
-                        .background(
-                            item.rawValue <= step.rawValue ? Color.accentColor : Color.secondary.opacity(0.18),
-                            in: Circle()
-                        )
-                        .foregroundStyle(item.rawValue <= step.rawValue ? Color.white : Color.secondary)
+                        .background(isReached ? Color.accentColor : Color.secondary.opacity(0.18), in: Circle())
+                        .foregroundStyle(isReached ? Color.white : Color.secondary)
                     Text(item.title)
-                        .font(.callout.weight(item == step ? .semibold : .regular))
-                        .foregroundStyle(item == step ? .primary : .secondary)
+                        .font(.callout.weight(item == service.workflowStep ? .semibold : .regular))
+                        .foregroundStyle(item == service.workflowStep ? .primary : .secondary)
                 }
                 if item != LocalPhotosWorkflowStep.allCases.last {
                     Rectangle()
@@ -244,18 +202,21 @@ struct LocalPhotosModeView: View {
                 Divider()
                 HStack {
                     Button("Back to Conversion Preview") {
-                        step = .convert
+                        appState.run(.back)
                     }
                     .pillActionButton()
+                    .help("Back to the conversion preview (⌘[ or Esc)")
                     .disabled(service.isRunning)
                     Text("Continue when the date-repair preview has been reviewed.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Continue to Organize Preview") {
-                        step = .organize
+                        service.workflowStep = .organize
                     }
                     .pillActionButton(prominent: true)
+                    .keyboardShortcut(.defaultAction)
+                    .help("Continue to the organize preview (↩)")
                     .disabled(service.isRunning)
                 }
             }
@@ -266,7 +227,7 @@ struct LocalPhotosModeView: View {
         LocalMediaConversionPreviewCard(
             service: service,
             filter: filter,
-            continueWithoutConversion: { step = .repair }
+            continueWithoutConversion: { service.workflowStep = .repair }
         )
     }
 
@@ -345,20 +306,17 @@ struct LocalPhotosModeView: View {
         LocalMediaOrganizationPreviewCard(
             service: service,
             filter: filter,
-            goBack: { step = .repair },
-            finish: { step = .complete }
+            goBack: { appState.run(.back) },
+            finish: { service.workflowStep = .complete }
         )
     }
 
     private var completionCard: some View {
         LocalMediaCompletionCard(
             service: service,
-            reviewRemaining: { step = .organize },
+            reviewRemaining: { service.workflowStep = .organize },
             rescan: rescan,
-            returnHome: {
-                service.reset()
-                appState.goHome()
-            }
+            returnHome: { appState.run(.home) }
         )
     }
 
@@ -394,22 +352,8 @@ struct LocalPhotosModeView: View {
         )
     }
 
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a media folder"
-        panel.prompt = "Scan"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        step = .convert
-        service.scan(directory: url)
-    }
-
     private func rescan() {
-        guard let directory = service.directory else { return }
-        step = .convert
-        service.scan(directory: directory)
+        appState.run(.refresh)
     }
 }
 
@@ -417,6 +361,7 @@ private struct LocalMediaConversionPreviewCard: View {
     @ObservedObject var service: LocalPhotosService
     let filter: String
     let continueWithoutConversion: () -> Void
+    @State private var confirmsConversion = false
 
     var body: some View {
         GlassCard {
@@ -465,15 +410,32 @@ private struct LocalMediaConversionPreviewCard: View {
                     if service.conversionItems.isEmpty {
                         Button("Continue to Date Preview", action: continueWithoutConversion)
                             .pillActionButton(prominent: true)
+                            .keyboardShortcut(.defaultAction)
+                            .help("Continue to the date preview (↩)")
                     } else {
-                        Button("Convert \(service.includedConversionItems.count) Files") {
-                            service.convertAll()
+                        Button("Convert \(service.includedConversionItems.count) Files…") {
+                            confirmsConversion = true
                         }
                         .pillActionButton(prominent: true)
+                        .keyboardShortcut(.defaultAction)
+                        .help("Convert the files in this preview (↩)")
                         .disabled(service.isRunning || service.includedConversionItems.isEmpty)
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Convert \(service.includedConversionItems.count) files?",
+            isPresented: $confirmsConversion,
+            titleVisibility: .visible
+        ) {
+            Button("Convert") { service.convertAll() }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Files convert exactly as shown in the preview. Originals marked "
+                + "“Original removed after verification” are permanently deleted once their "
+                + "converted copy checks out.")
         }
     }
 
@@ -551,6 +513,7 @@ private struct LocalMediaOrganizationPreviewCard: View {
     let filter: String
     let goBack: () -> Void
     let finish: () -> Void
+    @State private var confirmsOrganization = false
 
     var body: some View {
         GlassCard {
@@ -595,11 +558,23 @@ private struct LocalMediaOrganizationPreviewCard: View {
                 HStack {
                     Button("Back to Date Preview", action: goBack)
                         .pillActionButton()
+                        .help("Back to the date preview (⌘[ or Esc)")
                         .disabled(service.isRunning)
                     Spacer()
                     primaryButton
                 }
             }
+        }
+        .confirmationDialog(
+            "Organize \(service.includedOrganizationItems.count) files?",
+            isPresented: $confirmsOrganization,
+            titleVisibility: .visible
+        ) {
+            Button("Organize") { service.organizeAll() }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Every file moves exactly as shown in the preview.")
         }
     }
 
@@ -608,13 +583,16 @@ private struct LocalMediaOrganizationPreviewCard: View {
         if service.organizationItems.isEmpty {
             Button("Finish", action: finish)
                 .pillActionButton(prominent: true)
+                .keyboardShortcut(.defaultAction)
+                .help("Show the summary (↩)")
         } else {
-            Button("Organize \(service.includedOrganizationItems.count) Files") {
-                service.organizeAll()
+            Button("Organize \(service.includedOrganizationItems.count) Files…") {
+                confirmsOrganization = true
             }
             .pillActionButton(prominent: true)
+            .keyboardShortcut(.defaultAction)
             .disabled(service.isRunning || service.includedOrganizationItems.isEmpty)
-            .help("Move every file exactly as shown in this preview")
+            .help("Move every file exactly as shown in this preview (↩)")
         }
     }
 }
@@ -671,11 +649,13 @@ private struct LocalMediaCompletionCard: View {
                 .disabled(service.isRunning || service.organizationItems.isEmpty)
             Button("Rescan", action: rescan)
                 .pillActionButton()
+                .help("Scan the folder again (⌘R)")
                 .disabled(service.isRunning)
             Spacer()
             Button("Return Home", action: returnHome)
                 .pillActionButton(prominent: true)
-                .disabled(service.isRunning)
+                .keyboardShortcut(.defaultAction)
+                .help("Back to the home screen (↩ or ⇧⌘H)")
         }
     }
 }

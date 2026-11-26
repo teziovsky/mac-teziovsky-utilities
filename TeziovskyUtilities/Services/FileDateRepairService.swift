@@ -590,6 +590,32 @@ final class LocalPhotosService: ObservableObject {
                 attemptedIDs.insert(item.id)
                 progress.processed = index + 1
             }
+
+            // Repaired dates can change where Organize puts a file. The Dates list keeps its
+            // results; only the Organize preview is rebuilt from disk.
+            guard !Task.isCancelled, self.operationID == operationID else { return }
+            progress.currentPath = "Refreshing preview…"
+            do {
+                let refreshed = try await FileDateRepairScanner.scan(
+                    directory: directory,
+                    supportedExtensions: FileDateRepairExtensions.parse(AppSettings.localMediaExtensions),
+                    conversionConfig: AppSettings.localMediaConversionConfig,
+                    progress: { _ in }
+                )
+                guard self.operationID == operationID else { return }
+                organizationItems = refreshed.organizationItems
+                organizationSkippedCount = refreshed.organizationSkippedCount
+                keptItems = refreshed.keptItems
+            } catch is CancellationError {
+                return
+            } catch {
+                failures.append(FileDateRepairFailure(
+                    relativePath: directory.lastPathComponent,
+                    message: "Dates were repaired, but the Organize preview could not refresh: "
+                        + error.localizedDescription
+                ))
+            }
+            progress.currentPath = ""
         }
     }
 

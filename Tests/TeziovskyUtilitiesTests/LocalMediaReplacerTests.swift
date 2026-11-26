@@ -215,6 +215,19 @@ final class LocalMediaReplacerTests: XCTestCase {
 
         guard case .failed(let message) = outcome else { return XCTFail("Expected a failure, got \(outcome)") }
         XCTAssertTrue(message.hasPrefix("Couldn't move the original to the Trash"), message)
+        XCTAssertTrue(trash.trashedNames.isEmpty)
+        XCTAssertEqual(try contents("Mia.mp4"), [1])
+        XCTAssertEqual(try contents("Mia-converted.mp4"), [2])
+    }
+
+    func testCancelledDuringVerificationTrashesNothing() async throws {
+        _ = try write("Mia.mp4", bytes: [1])
+        _ = try write("Mia-converted.mp4", bytes: [2])
+
+        let outcome = await replacer(verify: { _ in withUnsafeCurrentTask { $0?.cancel() } }).replace(miaPair)
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertTrue(trash.trashedNames.isEmpty)
         XCTAssertEqual(try contents("Mia.mp4"), [1])
         XCTAssertEqual(try contents("Mia-converted.mp4"), [2])
     }
@@ -240,8 +253,13 @@ final class LocalMediaReplacerVerifyTests: XCTestCase {
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ))
-        context.setFillColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // A busy pattern, so a JPEG's compressed data is most of the file.
+        for index in 0..<200 {
+            context.setFillColor(
+                red: CGFloat(index % 7) / 7, green: CGFloat(index % 5) / 5, blue: CGFloat(index % 3) / 3, alpha: 1
+            )
+            context.fill(CGRect(x: (index * 37) % width, y: (index * 53) % height, width: 9, height: 7))
+        }
         let image = try XCTUnwrap(context.makeImage())
         let destination = try XCTUnwrap(
             CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)
@@ -335,14 +353,44 @@ final class LocalMediaReplacerVerifyTests: XCTestCase {
         XCTAssertNil(error)
     }
 
-    func testVideoCopyThatDoesNotDecodeFails() async throws {
+    func testHEV1VideoCopyFails() async throws {
         let original = root.appendingPathComponent("Clip.mov")
         try await TestVideoFactory.makeVideo(at: original, seconds: 1)
         let copy = root.appendingPathComponent("Clip.mp4")
         try await TestVideoFactory.makeHEV1Video(at: copy, seconds: 1, fileType: .mp4)
 
         let error = await verifyError(pair(original, copy, isVideo: true))
-        XCTAssertNotNil(error)
+        // AVFoundation reports a `hev1` movie as not playable, so the first check catches it.
+        XCTAssertEqual(error, "The converted copy isn't playable")
+    }
+
+    func testTruncatedVideoCopyFails() async throws {
+        let original = root.appendingPathComponent("Clip.mp4")
+        try await TestVideoFactory.makeVideo(at: original, seconds: 4, fileType: .mp4, optimizeForNetworkUse: true)
+        let data = try Data(contentsOf: original)
+        let moov = try XCTUnwrap(data.range(of: Data("moov".utf8)))
+        let mdat = try XCTUnwrap(data.range(of: Data("mdat".utf8)))
+        XCTAssertLessThan(moov.lowerBound, mdat.lowerBound, "the movie header must come first")
+        let copy = root.appendingPathComponent("Clip-converted.mp4")
+        try data.prefix(data.count * 6 / 10).write(to: copy)
+
+        let error = await verifyError(pair(original, copy, isVideo: true))
+        XCTAssertEqual(error, "The converted copy's video doesn't decode to the end")
+    }
+
+    func testTruncatedJPEGCopyFails() async throws {
+        let original = try writeImage("IMG.png", width: 64, height: 48, type: .png)
+        let full = try writeImage("Full.jpg", width: 64, height: 48, type: .jpeg)
+        let data = try Data(contentsOf: full)
+        for fraction in [5, 9] {
+            let copy = root.appendingPathComponent("IMG-\(fraction).jpg")
+            try data.prefix(data.count * fraction / 10).write(to: copy)
+
+            let error = await verifyError(pair(original, copy, isVideo: false))
+            XCTAssertEqual(error, "The converted copy is incomplete", "cut to \(fraction)0%")
+        }
+        let error = await verifyError(pair(original, full, isVideo: false))
+        XCTAssertNil(error)
     }
 
     func testBrokenVideoCopyFails() async throws {

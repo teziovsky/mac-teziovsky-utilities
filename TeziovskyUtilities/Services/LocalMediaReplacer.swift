@@ -10,6 +10,8 @@ enum LocalMediaReplacementOutcome: Equatable, Sendable {
     case replacedKeptCopyName(String)
     /// Nothing was trashed or renamed.
     case failed(String)
+    /// The run was cancelled before the original was trashed; nothing changed.
+    case cancelled
 }
 
 enum LocalMediaReplacementError: LocalizedError {
@@ -19,6 +21,8 @@ enum LocalMediaReplacementError: LocalizedError {
     case notPlayable
     case noDecodableFrame
     case durationMismatch
+    case incompleteImage
+    case incompleteVideo
 
     var errorDescription: String? {
         switch self {
@@ -29,6 +33,8 @@ enum LocalMediaReplacementError: LocalizedError {
         case .notPlayable: return "The converted copy isn't playable"
         case .noDecodableFrame: return "The converted copy's video doesn't decode"
         case .durationMismatch: return "The converted copy's duration doesn't match the original's"
+        case .incompleteImage: return "The converted copy is incomplete"
+        case .incompleteVideo: return "The converted copy's video doesn't decode to the end"
         }
     }
 }
@@ -56,11 +62,12 @@ struct LocalMediaReplacer {
         do {
             try await verify(pair)
         } catch {
+            if error is CancellationError || Task.isCancelled { return .cancelled }
             return .failed(error.localizedDescription)
         }
         // Verification can take seconds: look again right before anything changes.
         if let problem = Self.fileProblem(pair) { return .failed(problem) }
-        if Task.isCancelled { return .failed("Cancelled") }
+        if Task.isCancelled { return .cancelled }
 
         do {
             try trash(pair.originalURL)
@@ -113,17 +120,25 @@ struct LocalMediaReplacer {
         }
     }
 
-    /// The copy's first image decodes and has the original's raw pixel size. Both sizes come from
-    /// the stored pixel dimensions, so an EXIF orientation on either file doesn't matter.
+    /// The copy's first image fully decodes, its file is complete, and it has the original's raw
+    /// pixel size. Both sizes come from the stored pixel dimensions, so an EXIF orientation on
+    /// either file doesn't matter.
     static func verifyImage(copy: URL, original: URL) throws {
         guard let originalSize = pixelSize(of: original) else {
             throw LocalMediaReplacementError.unreadableOriginal
         }
+        let decodeNow = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(copy as CFURL, nil),
               CGImageSourceGetCount(source) > 0,
-              CGImageSourceCreateImageAtIndex(source, 0, nil) != nil,
+              CGImageSourceCreateImageAtIndex(source, 0, decodeNow) != nil,
               let copySize = pixelSize(of: source) else {
             throw LocalMediaReplacementError.undecodableImage
+        }
+        // ImageIO decodes a cut-off JPEG or PNG without complaint (the missing part comes out
+        // gray), so the file's own structure has to show that it is all there.
+        guard let data = try? Data(contentsOf: copy, options: .mappedIfSafe),
+              ImageFileCompleteness.isComplete(data, type: CGImageSourceGetType(source) as String?) else {
+            throw LocalMediaReplacementError.incompleteImage
         }
         guard copySize == originalSize else {
             throw LocalMediaReplacementError.sizeMismatch(copy: copySize, original: originalSize)
@@ -154,15 +169,30 @@ struct LocalMediaReplacer {
         guard await LocalMediaRemuxVerifier.decodesAFrame(copyAsset) else {
             throw LocalMediaReplacementError.noDecodableFrame
         }
+        // A file cut short whose movie header comes first still plays and reports its full
+        // duration: only decoding a frame near the end shows the media data is all there.
+        guard let copyDuration = await readableDuration(of: copyAsset),
+              await decodesFrameNearTheEnd(copyAsset, duration: copyDuration) else {
+            throw LocalMediaReplacementError.incompleteVideo
+        }
         // Many originals were converted precisely because AVFoundation can't read them (legacy
         // containers such as AVI or 3GP); some report no duration at all, or zero. Their copy was
         // already checked against them when it was made, so the duration is compared only when
         // the original's duration can be read.
         guard let originalDuration = await readableDuration(of: AVURLAsset(url: original)) else { return }
-        guard let copyDuration = await readableDuration(of: copyAsset),
-              LocalMediaRemuxVerifier.durationsMatch(copyDuration, source: originalDuration) else {
+        guard LocalMediaRemuxVerifier.durationsMatch(copyDuration, source: originalDuration) else {
             throw LocalMediaReplacementError.durationMismatch
         }
+    }
+
+    /// Decodes the exact frame half a second before the end. Zero tolerance matters: with any
+    /// tolerance the generator may hand back an earlier keyframe from the intact part of the file.
+    private static func decodesFrameNearTheEnd(_ asset: AVURLAsset, duration: Double) async -> Bool {
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let time = CMTime(seconds: max(0, duration - 0.5), preferredTimescale: 600)
+        return (try? await generator.image(at: time)) != nil
     }
 
     private static func readableDuration(of asset: AVURLAsset) async -> Double? {
@@ -170,5 +200,71 @@ struct LocalMediaReplacer {
             return nil
         }
         return duration.seconds
+    }
+}
+
+/// Whether an image file is whole, judged from its own structure. Only JPEG (what HEIC photos are
+/// converted to) and PNG are checked; other formats count as complete once they decode.
+enum ImageFileCompleteness {
+    static func isComplete(_ data: Data, type: String?) -> Bool {
+        switch type {
+        case "public.jpeg": return jpegIsComplete(data)
+        case "public.png": return pngIsComplete(data)
+        default: return true
+        }
+    }
+
+    /// Walks the JPEG segments from the start-of-image marker and requires the end-of-image
+    /// marker after the last scan. Segment lengths skip embedded data such as an EXIF thumbnail,
+    /// so its own end marker can't be mistaken for the file's.
+    static func jpegIsComplete(_ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            let count = bytes.count
+            guard count >= 4, bytes[0] == 0xFF, bytes[1] == 0xD8 else { return false }
+            var index = 2
+            while index < count {
+                guard bytes[index] == 0xFF else { return false }
+                while index < count, bytes[index] == 0xFF { index += 1 }
+                guard index < count else { return false }
+                let marker = bytes[index]
+                index += 1
+                if marker == 0xD9 { return true }
+                if marker == 0x01 || (0xD0...0xD7).contains(marker) { continue }
+                guard let length = segmentLength(bytes, at: index) else { return false }
+                index += length
+                if marker == 0xDA {
+                    guard let end = endOfScanData(bytes, from: index) else { return false }
+                    index = end
+                }
+            }
+            return false
+        }
+    }
+
+    /// The big-endian segment length (which counts its own two bytes), or nil when it is cut off
+    /// or impossible.
+    private static func segmentLength(_ bytes: UnsafeBufferPointer<UInt8>, at index: Int) -> Int? {
+        guard index + 1 < bytes.count else { return nil }
+        let length = Int(bytes[index]) << 8 | Int(bytes[index + 1])
+        return length >= 2 ? length : nil
+    }
+
+    /// Entropy-coded data runs until a marker that is neither a stuffed 0xFF00 nor a restart; nil
+    /// when the file ends first.
+    private static func endOfScanData(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int) -> Int? {
+        var index = start
+        while index + 1 < bytes.count {
+            let next = bytes[index + 1]
+            if bytes[index] == 0xFF, next != 0x00, !(0xD0...0xD7).contains(next) { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    /// A PNG ends with its IEND chunk: zero length, the type, and that chunk's fixed CRC.
+    static func pngIsComplete(_ data: Data) -> Bool {
+        let iend: [UInt8] = [0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]
+        return data.count >= 8 + iend.count && Array(data.suffix(iend.count)) == iend
     }
 }

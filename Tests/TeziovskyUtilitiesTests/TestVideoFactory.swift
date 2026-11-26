@@ -9,11 +9,14 @@ enum TestVideoFactory {
         seconds: Int,
         fileType: AVFileType = .mov,
         codec: AVVideoCodecType = .h264,
-        metadata: [AVMetadataItem] = []
+        metadata: [AVMetadataItem] = [],
+        optimizeForNetworkUse: Bool = false
     ) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
         writer.metadata = metadata
+        // Puts the movie header before the media data, so a cut-off file still opens.
+        writer.shouldOptimizeForNetworkUse = optimizeForNetworkUse
         let input = AVAssetWriterInput(
             mediaType: .video,
             outputSettings: [

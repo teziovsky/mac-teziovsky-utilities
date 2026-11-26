@@ -58,7 +58,11 @@ enum QuickLookHelper {
         }
 
         do {
-            try await PhotoAssetExporter.writeOriginalResource(for: asset, to: destination)
+            try await PhotoAssetExporter.writePreviewResource(
+                for: asset,
+                to: destination,
+                preferEdited: AppSettings.photosExportEditedVersions
+            )
         } catch PhotoAssetExportError.noResource {
             throw QuickLookError.noResource
         }

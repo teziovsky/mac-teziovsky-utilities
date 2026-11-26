@@ -128,14 +128,24 @@ struct LocalMediaConversionConfig: Sendable, Equatable {
 enum LocalMediaConversionKind: Sendable, Equatable {
     case heicToJPEG
     case legacyVideo(LocalVideoOutputContainer, LocalVideoCodec)
+    case remuxVideo(LocalVideoOutputContainer)
 
     var label: String {
         switch self {
         case .heicToJPEG: return "HEIC → highest-quality JPEG"
         case .legacyVideo(let container, let codec):
             return "Legacy video → \(container.fileExtension.uppercased()) · \(codec.label)"
+        case .remuxVideo(let container):
+            return "Rewrap into \(container.fileExtension.uppercased()) — streams copied, no quality loss"
         }
     }
+}
+
+enum LocalMediaConversionPlan: Sendable, Equatable {
+    case convert(LocalMediaConversionItem)
+    case notNeeded
+    /// The file needs conversion but macOS cannot read it; the reason is shown to the user.
+    case unsupported(String)
 }
 
 struct LocalMediaConversionItem: Identifiable, Sendable, Equatable {
@@ -166,6 +176,29 @@ struct LocalMediaOrganizationItem: Identifiable, Sendable, Equatable {
     let proposedSource: FileDateSource
     let isVideo: Bool
     let destinationWasRenamed: Bool
+}
+
+extension LocalMediaOrganizationItem {
+    fileprivate func moved(to destination: URL, root: URL) -> LocalMediaOrganizationItem {
+        LocalMediaOrganizationItem(
+            sourceURL: sourceURL,
+            sourceRelativePath: sourceRelativePath,
+            destinationURL: destination,
+            destinationRelativePath: LocalMediaOrganizationPlanner.relativePath(for: destination, root: root),
+            proposedDate: proposedDate,
+            proposedSource: proposedSource,
+            isVideo: isVideo,
+            destinationWasRenamed: destination.lastPathComponent != destinationURL.lastPathComponent
+        )
+    }
+}
+
+enum LocalMediaOrganizationPlan: Sendable, Equatable {
+    case move(LocalMediaOrganizationItem)
+    /// Already in its computed destination, or no usable date.
+    case unchanged
+    /// Belongs in a sibling year folder outside the scanned folder.
+    case outsideScannedFolder(year: String)
 }
 
 struct LocalMediaOrganizationSummary: Sendable, Equatable {
@@ -221,7 +254,38 @@ enum FileDateRepairPlanner {
     private static func isPlausible(_ date: Date, now: Date) -> Bool {
         let calendar = Calendar(identifier: .gregorian)
         let minimum = calendar.date(from: DateComponents(year: 1900, month: 1, day: 1)) ?? .distantPast
-        return date >= minimum && date <= now.addingTimeInterval(24 * 60 * 60)
+        return date >= minimum && date <= now.addingTimeInterval(24 * 60 * 60) && !isSentinel(date)
+    }
+
+    /// Epoch days written by zeroed fields or reset clocks: QuickTime/HFS (1904), Unix (1970)
+    /// and FAT (1980). Matched within ±14 h so the local-midnight form in any zone is covered.
+    private static let epochDays: [Date] = [1904, 1970, 1980].compactMap { utcDate(year: $0, month: 1, day: 1) }
+
+    /// Camera and framework defaults that are only suspicious at exactly midnight on 1 January.
+    private static let defaultMidnightYears: Set<Int> = [2000, 2001]
+
+    /// True for placeholder timestamps that must never win the "oldest date" vote.
+    static func isSentinel(_ date: Date) -> Bool {
+        if epochDays.contains(where: { abs(date.timeIntervalSince($0)) <= 14 * 60 * 60 }) {
+            return true
+        }
+        for zone in [TimeZone.current, TimeZone(secondsFromGMT: 0)!] {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone
+            let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+            let isNewYearMidnight = parts.month == 1 && parts.day == 1
+                && parts.hour == 0 && parts.minute == 0 && parts.second == 0
+            if isNewYearMidnight, let year = parts.year, defaultMidnightYears.contains(year) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func utcDate(year: Int, month: Int, day: Int) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
     }
 
     private static func evidenceSort(_ lhs: FileDateEvidence, _ rhs: FileDateEvidence) -> Bool {
@@ -251,33 +315,80 @@ enum LocalMediaOrganizationPlanner {
         rootDirectory: URL,
         evidence: [FileDateEvidence],
         isVideo: Bool,
+        groupsWithPhotos: Bool = false,
         now: Date = Date()
     ) -> LocalMediaOrganizationItem? {
+        let outcome = plan(
+            fileURL: fileURL,
+            relativePath: relativePath,
+            rootDirectory: rootDirectory,
+            evidence: evidence,
+            isVideo: isVideo,
+            groupsWithPhotos: groupsWithPhotos,
+            now: now
+        )
+        if case .move(let item) = outcome { return item }
+        return nil
+    }
+
+    static func plan(
+        fileURL: URL,
+        relativePath: String,
+        rootDirectory: URL,
+        evidence: [FileDateEvidence],
+        isVideo: Bool,
+        groupsWithPhotos: Bool = false,
+        now: Date = Date()
+    ) -> LocalMediaOrganizationPlan {
         guard let oldest = FileDateRepairPlanner.oldestPlausibleEvidence(in: evidence, now: now) else {
-            return nil
+            return .unchanged
         }
 
         let year = yearString(for: oldest.date)
-        let parent = fileURL.deletingLastPathComponent()
+        // Live Photo motion files follow their still into the photo folder, not `_Filmy`.
+        guard let destinationDirectory = destinationDirectory(
+            for: fileURL.deletingLastPathComponent(),
+            year: year,
+            placesAsVideo: isVideo && !groupsWithPhotos
+        ) else {
+            return .unchanged
+        }
+        let destination = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+        guard destination.standardizedFileURL != fileURL.standardizedFileURL else {
+            return .unchanged
+        }
+        // The year folder the file sits in lies above the scanned folder; its correct sibling
+        // is out of reach. Report it instead of silently counting it as organized.
+        guard isWithinRoot(destination, rootDirectory: rootDirectory) else {
+            return .outsideScannedFolder(year: year)
+        }
+
+        return .move(LocalMediaOrganizationItem(
+            sourceURL: fileURL,
+            sourceRelativePath: relativePath,
+            destinationURL: destination,
+            destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
+            proposedDate: oldest.date,
+            proposedSource: oldest.source,
+            isVideo: isVideo,
+            destinationWasRenamed: false
+        ))
+    }
+
+    /// `PARENT/YYYY[/_Filmy]`, or the sibling year folder when the file already sits under a
+    /// year folder. nil when the file is already in the right year (and video) folder.
+    private static func destinationDirectory(for parent: URL, year: String, placesAsVideo: Bool) -> URL? {
         let anchor: URL
         var preservedDirectories: [String] = []
-        var prependVideoDirectory = isVideo
+        var prependVideoDirectory = placesAsVideo
 
         if let currentYearDirectory = nearestYearDirectory(startingAt: parent) {
-            preservedDirectories = relativeDirectoryComponents(
-                from: currentYearDirectory,
-                to: parent
-            )
+            preservedDirectories = relativeDirectoryComponents(from: currentYearDirectory, to: parent)
             let isInVideoDirectory = preservedDirectories.contains(videoDirectoryName)
-            if currentYearDirectory.lastPathComponent == year {
-                if !isVideo, !isInVideoDirectory {
-                    return nil
-                }
-                if isVideo, isInVideoDirectory {
-                    return nil
-                }
+            if currentYearDirectory.lastPathComponent == year, placesAsVideo == isInVideoDirectory {
+                return nil
             }
-            if isVideo {
+            if placesAsVideo {
                 prependVideoDirectory = false
                 if !isInVideoDirectory {
                     preservedDirectories.append(videoDirectoryName)
@@ -297,51 +408,79 @@ enum LocalMediaOrganizationPlanner {
         for component in preservedDirectories {
             destinationDirectory.appendPathComponent(component, isDirectory: true)
         }
-        let destination = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
-        guard destination.standardizedFileURL != fileURL.standardizedFileURL,
-              isWithinRoot(destination, rootDirectory: rootDirectory) else {
-            return nil
-        }
-
-        return LocalMediaOrganizationItem(
-            sourceURL: fileURL,
-            sourceRelativePath: relativePath,
-            destinationURL: destination,
-            destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
-            proposedDate: oldest.date,
-            proposedSource: oldest.source,
-            isVideo: isVideo,
-            destinationWasRenamed: false
-        )
+        return destinationDirectory
     }
 
+    private static let livePhotoStillExtensions: Set<String> = ["heic", "heif", "jpg", "jpeg"]
+    private static let livePhotoMotionExtensions: Set<String> = ["mov"]
+
+    /// Maps each Live Photo motion file to its still: a `.mov` sharing the directory and the
+    /// (case-insensitive) base name with a HEIC/JPEG.
+    static func livePhotoCompanions(in relativePaths: [String]) -> [String: String] {
+        var stillsByKey: [String: String] = [:]
+        for path in relativePaths.sorted()
+        where livePhotoStillExtensions.contains((path as NSString).pathExtension.lowercased()) {
+            let key = pairKey(path)
+            if stillsByKey[key] == nil {
+                stillsByKey[key] = path
+            }
+        }
+        var companions: [String: String] = [:]
+        for path in relativePaths
+        where livePhotoMotionExtensions.contains((path as NSString).pathExtension.lowercased()) {
+            if let still = stillsByKey[pairKey(path)] {
+                companions[path] = still
+            }
+        }
+        return companions
+    }
+
+    private static func pairKey(_ relativePath: String) -> String {
+        (relativePath as NSString).deletingPathExtension.lowercased()
+    }
+
+    /// Assigns collision-free destinations. Live Photo motion files are placed after their
+    /// stills and reuse the still's final base name (`IMG (1).HEIC` → `IMG (1).MOV`) so the
+    /// pair stays recognisable.
     static func resolveCollisions(
         _ candidates: [LocalMediaOrganizationItem],
         rootDirectory: URL,
+        livePhotoCompanions: [String: String] = [:],
         fileManager: FileManager = .default
     ) -> [LocalMediaOrganizationItem] {
         var reservedPaths = Set<String>()
-        return candidates
-            .sorted {
-                $0.sourceRelativePath.localizedStandardCompare($1.sourceRelativePath) == .orderedAscending
+        let sorted = candidates.sorted {
+            $0.sourceRelativePath.localizedStandardCompare($1.sourceRelativePath) == .orderedAscending
+        }
+        let motion = sorted.filter { livePhotoCompanions[$0.sourceRelativePath] != nil }
+        let others = sorted.filter { livePhotoCompanions[$0.sourceRelativePath] == nil }
+
+        var resolved: [String: LocalMediaOrganizationItem] = [:]
+        for item in others {
+            let destination = uniqueDestination(
+                preferred: item.destinationURL,
+                reservedPaths: &reservedPaths,
+                fileManager: fileManager
+            )
+            resolved[item.sourceRelativePath] = item.moved(to: destination, root: rootDirectory)
+        }
+        for item in motion {
+            var preferred = item.destinationURL
+            if let stillPath = livePhotoCompanions[item.sourceRelativePath],
+               let still = resolved[stillPath] {
+                let base = still.destinationURL.deletingPathExtension().lastPathComponent
+                preferred = still.destinationURL.deletingLastPathComponent()
+                    .appendingPathComponent(base)
+                    .appendingPathExtension(item.destinationURL.pathExtension)
             }
-            .map { item in
-                let destination = uniqueDestination(
-                    preferred: item.destinationURL,
-                    reservedPaths: &reservedPaths,
-                    fileManager: fileManager
-                )
-                return LocalMediaOrganizationItem(
-                    sourceURL: item.sourceURL,
-                    sourceRelativePath: item.sourceRelativePath,
-                    destinationURL: destination,
-                    destinationRelativePath: makeRelativePath(for: destination, root: rootDirectory),
-                    proposedDate: item.proposedDate,
-                    proposedSource: item.proposedSource,
-                    isVideo: item.isVideo,
-                    destinationWasRenamed: destination.lastPathComponent != item.destinationURL.lastPathComponent
-                )
-            }
+            let destination = uniqueDestination(
+                preferred: preferred,
+                reservedPaths: &reservedPaths,
+                fileManager: fileManager
+            )
+            resolved[item.sourceRelativePath] = item.moved(to: destination, root: rootDirectory)
+        }
+        return sorted.compactMap { resolved[$0.sourceRelativePath] }
     }
 
     private static func uniqueDestination(
@@ -372,8 +511,13 @@ enum LocalMediaOrganizationPlanner {
         return String(calendar.component(.year, from: date))
     }
 
+    /// Four ASCII digits forming a plausible photo year; `0815` or `9999` are ordinary folders.
     private static func isYearDirectory(_ name: String) -> Bool {
-        name.count == 4 && name.allSatisfy(\.isNumber)
+        guard name.count == 4, name.allSatisfy({ $0.isASCII && $0.isNumber }), let year = Int(name) else {
+            return false
+        }
+        let currentYear = Calendar(identifier: .gregorian).component(.year, from: Date())
+        return (1900...(currentYear + 1)).contains(year)
     }
 
     private static func nearestYearDirectory(startingAt directory: URL) -> URL? {
@@ -400,6 +544,10 @@ enum LocalMediaOrganizationPlanner {
         let rootPath = canonicalPath(for: rootDirectory)
         let path = canonicalPath(for: url)
         return path == rootPath || path.hasPrefix(rootPath + "/")
+    }
+
+    fileprivate static func relativePath(for url: URL, root: URL) -> String {
+        makeRelativePath(for: url, root: root)
     }
 
     private static func makeRelativePath(for url: URL, root: URL) -> String {

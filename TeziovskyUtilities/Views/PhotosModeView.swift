@@ -94,11 +94,7 @@ struct PhotosModeView: View {
                             || !appState.canOrganizeSelectedAlbum
                     )
                     .keyboardShortcut("e", modifiers: .command)
-                    .help(
-                        appState.canOrganizeSelectedAlbum
-                            ? "Export, move to album with suffix, and remove from source (⌘E)"
-                            : "This album is omitted from Organize in Photos settings"
-                    )
+                    .help(organizeHelp)
                 }
             }
         }
@@ -121,6 +117,16 @@ struct PhotosModeView: View {
                 AlbumNumberKeyboardShortcuts()
             }
         }
+    }
+
+    private var organizeHelp: String {
+        if appState.canOrganizeSelectedAlbum {
+            return "Export, move to album with suffix, and remove from source (⌘E)"
+        }
+        if AppSettings.excludedAlbumSuffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Set an album suffix in Settings → Photos; organized items move to that album"
+        }
+        return "This album is omitted from Organize in Photos settings"
     }
 
     private var mainToolbarTitle: String {

@@ -3,8 +3,9 @@ import SwiftUI
 
 struct DroneModeView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var pendingDestructiveStep: DroneFinalizeStep?
 
-    private var workflow: DroneWorkflowCoordinator { appState.droneWorkflow }
+    @ObservedObject var workflow: DroneWorkflowCoordinator
     private var finalizer: DroneFinalizer { workflow.finalizer }
     private var config: DroneFinalizeConfig { AppSettings.droneFinalizeConfig }
 
@@ -44,20 +45,54 @@ struct DroneModeView: View {
                 }
                 .help("Back to the home screen (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+                .disabled(isBusy)
             }
 
             ToolbarItem(placement: .navigation) {
                 Button {
                     workflow.goBack()
                 } label: {
-                    Label("Go Back", systemImage: "arrow.uturn.backward")
+                    Label("Go Back", systemImage: "chevron.backward")
                 }
-                .help("Go back one step (⌘[ or Esc)")
+                .help("Go back one step (⌘[ or Esc). Never changes files.")
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(!workflow.canGoBack || isBusy)
             }
+
+            if workflow.canUndoFinalizeStep {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        workflow.undoLastFinalizeStep()
+                    } label: {
+                        Label("Undo Last Step", systemImage: "arrow.uturn.backward")
+                    }
+                    .help("Revert the last finalize step: restore trashed files and undo renames (⌘Z)")
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(isBusy)
+                }
+            }
         }
         .onEscape(perform: handleEscape)
+        .confirmationDialog(
+            pendingDestructiveStep.map { "\($0.actionTitle)?" } ?? "",
+            isPresented: Binding(
+                get: { pendingDestructiveStep != nil },
+                set: { if !$0 { pendingDestructiveStep = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDestructiveStep
+        ) { step in
+            Button(step.actionTitle, role: .destructive) {
+                pendingDestructiveStep = nil
+                workflow.performFinalizeStep()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDestructiveStep = nil
+            }
+            .keyboardShortcut(.defaultAction)
+        } message: { step in
+            Text(confirmationMessage(for: step))
+        }
         .onDisappear {
             if !isBusy {
                 workflow.reset()
@@ -159,6 +194,7 @@ struct DroneModeView: View {
                 progress: workflow.compressionSession.progress,
                 isRunning: workflow.compressionSession.isRunning,
                 onStart: { workflow.startCompression() },
+                onCancel: { workflow.compressionSession.cancel() },
                 action: { workflow.continueFromCompression() }
             )
         case .finalize:
@@ -188,7 +224,7 @@ struct DroneModeView: View {
                 config: config,
                 isRunning: finalizer.isRunning,
                 statusMessage: finalizer.statusMessage,
-                action: { workflow.performFinalizeStep() }
+                action: { pendingDestructiveStep = .cleanup }
             )
         case .flatten:
             DroneFlattenStepView(
@@ -196,7 +232,7 @@ struct DroneModeView: View {
                 config: config,
                 isRunning: finalizer.isRunning,
                 statusMessage: finalizer.statusMessage,
-                action: { workflow.performFinalizeStep() }
+                action: { pendingDestructiveStep = .flatten }
             )
         case .done:
             DroneDoneStepView(
@@ -218,13 +254,32 @@ struct DroneModeView: View {
         workflow.loadProject(projectDirectory: url, config: config)
     }
 
+    /// Esc only navigates. It never undoes a finalize step and never leaves a project that
+    /// already has changes; both need an explicit button.
     private func handleEscape() {
-        guard !isBusy else { return }
+        guard !isBusy, pendingDestructiveStep == nil else { return }
         if workflow.canGoBack {
             workflow.goBack()
-        } else {
+        } else if workflow.phase == .validateLayout {
             workflow.reset()
             appState.goHome()
+        }
+    }
+
+    private func confirmationMessage(for step: DroneFinalizeStep) -> String {
+        let plan = finalizer.plan
+        switch step {
+        case .cleanup:
+            let count = plan?.matchedPairs.count ?? 0
+            return "\(count) original\(count == 1 ? "" : "s") will be moved to the Trash and compressed files renamed. "
+                + "You can undo this step afterwards."
+        case .flatten:
+            let rawNote = finalizer.config.keepRawAfterFinalize
+                ? ""
+                : " The “\(finalizer.config.rawDirectoryName)/” folder with the raw footage will be moved to the Trash."
+            return "Finished media will be moved into the project folder.\(rawNote) You can undo this step afterwards."
+        case .merge, .done:
+            return ""
         }
     }
 }
@@ -466,28 +521,57 @@ private struct DroneCompressStepView: View {
     let progress: HandBrakeCompressionProgress?
     let isRunning: Bool
     let onStart: () -> Void
+    let onCancel: () -> Void
     let action: () -> Void
 
     private var isComplete: Bool { progress?.isComplete == true }
 
+    private var description: String {
+        "Compress \(exports.count) export\(exports.count == 1 ? "" : "s") with preset “\(preset)” using HandBrakeCLI."
+    }
+
     var body: some View {
         DroneWorkflowStepContainer(
             phase: .compress,
-            description: "Compress \(exports.count) export\(exports.count == 1 ? "" : "s") with preset “\(preset)” using HandBrakeCLI.",
+            description: description,
             isRunning: isRunning,
-            statusMessage: progress.map { "Compressing \($0.filename) (\($0.current)/\($0.total))" },
+            statusMessage: progress.map(Self.statusMessage),
             actionTitle: isComplete ? "Continue to finalize" : "Start compression",
             actionRole: nil,
             actionDisabled: isRunning || (!isComplete && preset.isEmpty),
             action: isComplete ? action : onStart
         ) {
             if let progress, isRunning || isComplete {
-                ProgressView(value: Double(progress.current), total: Double(max(progress.total, 1)))
-                Text("\(progress.current) of \(progress.total) complete")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                ProgressView(value: progress.overallFraction)
+                HStack {
+                    Text(Self.summary(progress))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isRunning {
+                        Button("Cancel", role: .cancel, action: onCancel)
+                            .pillActionButton()
+                            .help("Stop HandBrakeCLI; the unfinished file is discarded")
+                    }
+                }
             }
         }
+    }
+
+    private static func statusMessage(_ progress: HandBrakeCompressionProgress) -> String {
+        var parts = ["Compressing \(progress.filename) (\(progress.current)/\(progress.total))"]
+        parts.append("\(Int((progress.fileFraction * 100).rounded(.down)))%")
+        if let eta = progress.eta {
+            parts.append("ETA \(eta)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func summary(_ progress: HandBrakeCompressionProgress) -> String {
+        if progress.wasCancelled {
+            return "Cancelled after \(progress.completed) of \(progress.total)"
+        }
+        return "\(progress.completed) of \(progress.total) complete"
     }
 }
 

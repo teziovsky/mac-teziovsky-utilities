@@ -355,6 +355,13 @@ struct DroneCleanupStepView: View {
                 matchedPairs: plan?.matchedPairs ?? [],
                 unmatched: plan?.unmatchedCompressed ?? []
             )
+            if let conflicts = plan?.conflicts, !conflicts.isEmpty {
+                DroneKeptFilesList(
+                    title: "Skipped — the final name is already taken",
+                    note: "These compressed files are not renamed and stay in “\(config.exportDirectoryName)/”.",
+                    files: conflicts
+                )
+            }
         }
     }
 }
@@ -605,6 +612,7 @@ struct DroneFlattenStepView: View {
         ) {
             DroneFlattenChangesView(
                 mediaNames: plan?.finalMediaNames.sorted() ?? [],
+                keptFiles: ((plan?.leftoverFiles ?? []) + (plan?.conflicts ?? [])).sorted(),
                 config: config
             )
         }
@@ -619,12 +627,17 @@ private enum DroneFlattenStyle {
 
 private struct DroneFlattenChangesView: View {
     let mediaNames: [String]
+    let keptFiles: [String]
     let config: DroneFinalizeConfig
 
-    private var trashFolders: [String] {
-        var folders = [config.exportDirectoryName]
+    /// Folders moved to the Trash, with what they still contain at that point.
+    private var trashFolders: [(name: String, contents: String)] {
+        var folders: [(name: String, contents: String)] = []
         if !config.keepRawAfterFinalize {
-            folders.insert(config.rawDirectoryName, at: 0)
+            folders.append((config.rawDirectoryName, "Raw footage"))
+        }
+        if keptFiles.isEmpty {
+            folders.append((config.exportDirectoryName, "Empty after moves"))
         }
         return folders
     }
@@ -658,7 +671,50 @@ private struct DroneFlattenChangesView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
             )
+
+            if !keptFiles.isEmpty {
+                DroneKeptFilesList(
+                    title: "Stays in “\(config.exportDirectoryName)/” — not deleted",
+                    note: "These files are not part of the delivery, so “\(config.exportDirectoryName)/” is kept.",
+                    files: keptFiles
+                )
+            }
         }
+    }
+}
+
+/// Files the finalize step leaves untouched, listed so nothing disappears unannounced.
+private struct DroneKeptFilesList: View {
+    let title: String
+    let note: String
+    let files: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: "tray.full")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(note)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            ForEach(files.prefix(30), id: \.self) { file in
+                Text(file)
+                    .font(.callout.monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if files.count > 30 {
+                Text("And \(files.count - 30) more…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.orange.opacity(0.08))
+        )
     }
 }
 
@@ -741,7 +797,7 @@ private struct DroneFlattenMoveUpSection: View {
 }
 
 private struct DroneFlattenTrashSection: View {
-    let folders: [String]
+    let folders: [(name: String, contents: String)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -753,8 +809,13 @@ private struct DroneFlattenTrashSection: View {
             )
 
             VStack(spacing: 8) {
-                ForEach(folders, id: \.self) { folder in
-                    DroneFlattenTrashRow(folderName: folder)
+                if folders.isEmpty {
+                    Text("Nothing is moved to the Trash.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary.opacity(0.85))
+                }
+                ForEach(folders, id: \.name) { folder in
+                    DroneFlattenTrashRow(folderName: folder.name, contents: folder.contents)
                 }
             }
         }
@@ -803,6 +864,7 @@ private struct DroneFlattenMoveUpRow: View {
 
 private struct DroneFlattenTrashRow: View {
     let folderName: String
+    let contents: String
 
     var body: some View {
         HStack(spacing: 8) {
@@ -815,7 +877,7 @@ private struct DroneFlattenTrashRow: View {
 
             Spacer(minLength: 8)
 
-            Text("Empty folder")
+            Text(contents)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary.opacity(0.85))
                 .padding(.horizontal, 8)

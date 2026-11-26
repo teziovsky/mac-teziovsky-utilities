@@ -42,17 +42,42 @@ enum VideoMetadataTransfer {
         let asset = AVURLAsset(url: url)
         let metadata = try await asset.load(.commonMetadata)
         var didFindCreationDate = false
-        let synchronized = metadata.map { item -> AVMetadataItem in
+        var synchronized: [AVMetadataItem] = []
+        for item in metadata {
             guard item.commonKey == .commonKeyCreationDate,
                   let mutableItem = item.mutableCopy() as? AVMutableMetadataItem else {
-                return item
+                synchronized.append(item)
+                continue
             }
             didFindCreationDate = true
-            mutableItem.value = date as NSDate
-            return mutableItem
+            // QuickTime/MP4 store creation dates as ISO 8601 text; an NSDate value is silently
+            // dropped by the export, which would erase the date instead of updating it.
+            let original = try? await item.load(.stringValue)
+            mutableItem.value = creationDateString(for: date, matching: original) as NSString
+            synchronized.append(mutableItem)
         }
         guard didFindCreationDate else { return }
         try await rewrite(url, metadata: synchronized)
+    }
+
+    /// ISO 8601 text for `date`, expressed in the UTC offset of `original` when it has one
+    /// (e.g. iPhone `2019-06-08T15:20:00+0200`), otherwise in the current time zone.
+    static func creationDateString(for date: Date, matching original: String?) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = original.flatMap(utcOffset(in:)) ?? .current
+        return formatter.string(from: date)
+    }
+
+    private static func utcOffset(in value: String) -> TimeZone? {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix("Z") { return TimeZone(secondsFromGMT: 0) }
+        guard let signIndex = trimmed.lastIndex(where: { $0 == "+" || $0 == "-" }),
+              trimmed.distance(from: signIndex, to: trimmed.endIndex) <= 6,
+              trimmed[..<signIndex].contains("T") else {
+            return nil
+        }
+        return ExifDateCodec.timeZone(forOffset: String(trimmed[signIndex...]))
     }
 
     private static func rewrite(_ url: URL, metadata: [AVMetadataItem]) async throws {

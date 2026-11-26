@@ -11,6 +11,8 @@ enum AppSettings {
     private static let exportDirectoryBookmarkKey = "exportDirectoryBookmark"
     private static let exportDirectoryPathKey = "exportDirectoryPath"
     private static let organizeByYearEnabledKey = "organizeByYearEnabled"
+    static let photosExportEditedVersionsKey = "photosExportEditedVersions"
+    static let photosExportCompanionFilesKey = "photosExportCompanionFiles"
     private static let droneCompressedSuffixKey = "droneCompressedSuffix"
     private static let droneRawDirectoryNameKey = "droneRawDirectoryName"
     private static let droneExportDirectoryNameKey = "droneExportDirectoryName"
@@ -85,6 +87,23 @@ enum AppSettings {
     static var organizeByYearEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: organizeByYearEnabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: organizeByYearEnabledKey) }
+    }
+
+    /// When true (the historical behaviour), edited photos export their edited render;
+    /// when false, the unmodified original is exported.
+    static var photosExportEditedVersions: Bool {
+        get { bool(forKey: photosExportEditedVersionsKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: photosExportEditedVersionsKey) }
+    }
+
+    /// Exports Live Photo motion and RAW alternates next to the primary file.
+    static var photosExportCompanionFiles: Bool {
+        get { bool(forKey: photosExportCompanionFilesKey, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: photosExportCompanionFilesKey) }
+    }
+
+    private static func bool(forKey key: String, default defaultValue: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) == nil ? defaultValue : UserDefaults.standard.bool(forKey: key)
     }
 
     // MARK: - Drone finalize
@@ -295,25 +314,29 @@ enum AppSettings {
         }
     }
 
+    /// The chosen export folder. The security-scoped bookmark wins over the stored path: it
+    /// follows the folder when it is moved and is the only form that grants access in a
+    /// sandboxed build. Callers start/stop access themselves (see `ExportDirectoryAccess`).
     static func resolveExportDirectory() -> URL? {
-        if let url = exportDirectoryURL, FileManager.default.fileExists(atPath: url.path) {
-            _ = url.startAccessingSecurityScopedResource()
-            return url
+        if let data = UserDefaults.standard.data(forKey: exportDirectoryBookmarkKey) {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                if isStale || url.path != exportDirectoryPath {
+                    let didAccess = url.startAccessingSecurityScopedResource()
+                    setExportDirectory(url)
+                    if didAccess { url.stopAccessingSecurityScopedResource() }
+                }
+                return url
+            }
         }
-        guard let data = UserDefaults.standard.data(forKey: exportDirectoryBookmarkKey) else {
-            return exportDirectoryURL
+        guard let url = exportDirectoryURL, FileManager.default.fileExists(atPath: url.path) else {
+            return nil
         }
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
-            return exportDirectoryURL
-        }
-        _ = url.startAccessingSecurityScopedResource()
-        exportDirectoryPath = url.path
         return url
     }
 }

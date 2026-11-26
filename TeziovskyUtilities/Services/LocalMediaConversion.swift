@@ -15,42 +15,41 @@ enum LocalMediaConversionPlanner {
             || legacyVideoExtensions.contains(url.pathExtension.lowercased())
     }
 
-    static func makeCandidate(
+    static func plan(
         fileURL: URL,
         relativePath: String,
         rootDirectory: URL,
         config: LocalMediaConversionConfig
-    ) async -> LocalMediaConversionItem? {
+    ) async -> LocalMediaConversionPlan {
         if config.keepOriginals, LocalMediaConverter.hasConversionMarker(fileURL) {
-            return nil
+            return .notNeeded
         }
         let fileExtension = fileURL.pathExtension.lowercased()
         let kind: LocalMediaConversionKind
 
-        if config.convertHEIC, heicExtensions.contains(fileExtension) {
+        if heicExtensions.contains(fileExtension) {
+            guard config.convertHEIC else { return .notNeeded }
             kind = .heicToJPEG
-        } else if config.convertLegacyVideos,
-                  isVideoCandidate(fileURL),
-                  await videoNeedsConversion(fileURL, fileExtension: fileExtension) {
-            kind = .legacyVideo(config.videoOutputContainer, config.videoCodec)
+        } else if config.convertLegacyVideos, isVideoCandidate(fileURL) {
+            switch await videoConversion(fileURL, fileExtension: fileExtension, config: config) {
+            case .some(.success(let videoKind)):
+                kind = videoKind
+            case .some(.failure(let reason)):
+                return .unsupported(reason.message)
+            case .none:
+                return .notNeeded
+            }
         } else {
-            return nil
+            return .notNeeded
         }
 
-        let outputExtension: String
-        switch kind {
-        case .heicToJPEG:
-            outputExtension = "jpg"
-        case .legacyVideo(let container, _):
-            outputExtension = container.fileExtension
+        let destination = preferredDestination(for: fileURL, kind: kind)
+        // A converted twin already sits next to the source (an earlier run, possibly with the
+        // marker lost to a rewrite or a changed "keep originals" setting): don't convert again.
+        if FileManager.default.fileExists(atPath: destination.path) {
+            return .notNeeded
         }
-        let base = fileURL.deletingPathExtension().lastPathComponent
-        let preferredName = fileExtension == outputExtension
-            ? "\(base)-converted.\(outputExtension)"
-            : "\(base).\(outputExtension)"
-        let destination = fileURL.deletingLastPathComponent().appendingPathComponent(preferredName)
-
-        return LocalMediaConversionItem(
+        return .convert(LocalMediaConversionItem(
             sourceURL: fileURL,
             sourceRelativePath: relativePath,
             destinationURL: destination,
@@ -58,7 +57,87 @@ enum LocalMediaConversionPlanner {
             kind: kind,
             keepOriginal: config.keepOriginals,
             destinationWasRenamed: false
+        ))
+    }
+
+    static func makeCandidate(
+        fileURL: URL,
+        relativePath: String,
+        rootDirectory: URL,
+        config: LocalMediaConversionConfig
+    ) async -> LocalMediaConversionItem? {
+        let outcome = await plan(
+            fileURL: fileURL,
+            relativePath: relativePath,
+            rootDirectory: rootDirectory,
+            config: config
         )
+        if case .convert(let item) = outcome { return item }
+        return nil
+    }
+
+    private static func preferredDestination(for fileURL: URL, kind: LocalMediaConversionKind) -> URL {
+        let outputExtension: String
+        switch kind {
+        case .heicToJPEG:
+            outputExtension = "jpg"
+        case .legacyVideo(let container, _), .remuxVideo(let container):
+            outputExtension = container.fileExtension
+        }
+        let fileExtension = fileURL.pathExtension.lowercased()
+        let base = fileURL.deletingPathExtension().lastPathComponent
+        let preferredName = fileExtension == outputExtension
+            ? "\(base)-converted.\(outputExtension)"
+            : "\(base).\(outputExtension)"
+        return fileURL.deletingLastPathComponent().appendingPathComponent(preferredName)
+    }
+
+    private struct UnsupportedReason: Error {
+        let message: String
+    }
+
+    /// nil when the file needs nothing; otherwise the conversion to run or why it cannot run.
+    private static func videoConversion(
+        _ url: URL,
+        fileExtension: String,
+        config: LocalMediaConversionConfig
+    ) async -> Result<LocalMediaConversionKind, UnsupportedReason>? {
+        let asset = AVURLAsset(url: url)
+        guard let tracks = try? await asset.load(.tracks), !tracks.isEmpty else {
+            return .failure(UnsupportedReason(
+                message: "macOS cannot read this video (unsupported container or codec). "
+                    + "Convert it with HandBrake or ffmpeg."
+            ))
+        }
+        guard let videoTrack = tracks.first(where: { $0.mediaType == .video }) else {
+            return nil
+        }
+        let videoCodec = await codec(of: videoTrack)
+        let hasModernVideo = videoCodec.map(modernVideoCodecs.contains) ?? false
+        let isModernContainer = fileExtension == "mp4" || fileExtension == "mov"
+        if isModernContainer, hasModernVideo {
+            return nil
+        }
+
+        var audioIsAAC = true
+        for track in tracks where track.mediaType == .audio {
+            audioIsAAC = await codec(of: track) == kAudioFormatMPEG4AAC && audioIsAAC
+        }
+        // Modern streams in an old container only need rewrapping: copy them losslessly.
+        if hasModernVideo, audioIsAAC {
+            return .success(.remuxVideo(config.videoOutputContainer))
+        }
+        guard (try? await asset.load(.isExportable)) == true else {
+            return .failure(UnsupportedReason(
+                message: "macOS can read but not re-encode this video. Convert it with HandBrake or ffmpeg."
+            ))
+        }
+        return .success(.legacyVideo(config.videoOutputContainer, config.videoCodec))
+    }
+
+    private static func codec(of track: AVAssetTrack) async -> FourCharCode? {
+        guard let description = try? await track.load(.formatDescriptions).first else { return nil }
+        return CMFormatDescriptionGetMediaSubType(description)
     }
 
     static func resolveCollisions(
@@ -87,22 +166,6 @@ enum LocalMediaConversionPlanner {
                     destinationWasRenamed: destination.lastPathComponent != item.destinationURL.lastPathComponent
                 )
             }
-    }
-
-    private static func videoNeedsConversion(_ url: URL, fileExtension: String) async -> Bool {
-        guard !legacyVideoExtensions.contains(fileExtension),
-              fileExtension == "mp4" || fileExtension == "mov" else {
-            return true
-        }
-
-        let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let descriptions = try? await track.load(.formatDescriptions),
-              let description = descriptions.first else {
-            return true
-        }
-        let codec = CMFormatDescriptionGetMediaSubType(description)
-        return !modernVideoCodecs.contains(codec)
     }
 
     private static let modernVideoCodecs: Set<FourCharCode> = [
@@ -211,8 +274,10 @@ enum LocalMediaConverter {
                     container: container,
                     codec: codec
                 )
+            case .remuxVideo(let container):
+                try await remuxVideo(item.sourceURL, to: item.destinationURL, container: container)
             }
-            try await verify(item.destinationURL, kind: item.kind)
+            try await verify(item.destinationURL, source: item.sourceURL, kind: item.kind)
             let created = dates.creationDate ?? dates.contentModificationDate ?? Date()
             let modified = dates.contentModificationDate ?? created
             try FileDatePreservation.applyFileDates(
@@ -301,6 +366,46 @@ enum LocalMediaConverter {
         try await runExport(session)
     }
 
+    /// Copies the existing streams into a modern container without re-encoding.
+    private static func remuxVideo(
+        _ sourceURL: URL,
+        to destinationURL: URL,
+        container: LocalVideoOutputContainer
+    ) async throws {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+            throw LocalMediaConversionError.exportUnavailable
+        }
+        let outputType: AVFileType = container == .mp4 ? .mp4 : .mov
+        guard session.supportedFileTypes.contains(outputType) else {
+            throw LocalMediaConversionError.unsupportedOutput
+        }
+        session.outputURL = destinationURL
+        session.outputFileType = outputType
+        session.shouldOptimizeForNetworkUse = container == .mp4
+        session.metadata = (try? await asset.load(.metadata)) ?? []
+        try await runExport(session)
+    }
+
+    /// A rewrapped file must play and keep the source's video codec and duration.
+    private static func verifyRemux(_ url: URL, source: URL) async throws {
+        let output = AVURLAsset(url: url)
+        let original = AVURLAsset(url: source)
+        guard try await output.load(.isPlayable),
+              let outputTrack = try await output.loadTracks(withMediaType: .video).first,
+              let sourceTrack = try await original.loadTracks(withMediaType: .video).first,
+              let outputCodec = try await outputTrack.load(.formatDescriptions).first,
+              let sourceCodec = try await sourceTrack.load(.formatDescriptions).first,
+              CMFormatDescriptionGetMediaSubType(outputCodec) == CMFormatDescriptionGetMediaSubType(sourceCodec) else {
+            throw LocalMediaConversionError.verificationFailed
+        }
+        let outputDuration = try await output.load(.duration).seconds
+        let sourceDuration = try await original.load(.duration).seconds
+        guard abs(outputDuration - sourceDuration) <= max(0.5, sourceDuration * 0.01) else {
+            throw LocalMediaConversionError.verificationFailed
+        }
+    }
+
     private static func runExport(_ session: AVAssetExportSession) async throws {
         try Task.checkCancellation()
         let cancellation = MediaConversionCancellation(session: session)
@@ -326,13 +431,15 @@ enum LocalMediaConverter {
         }
     }
 
-    private static func verify(_ url: URL, kind: LocalMediaConversionKind) async throws {
+    private static func verify(_ url: URL, source: URL, kind: LocalMediaConversionKind) async throws {
         switch kind {
         case .heicToJPEG:
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   CGImageSourceGetCount(source) > 0 else {
                 throw LocalMediaConversionError.verificationFailed
             }
+        case .remuxVideo:
+            try await verifyRemux(url, source: source)
         case .legacyVideo(_, let expectedCodec):
             let asset = AVURLAsset(url: url)
             guard try await asset.load(.isPlayable),

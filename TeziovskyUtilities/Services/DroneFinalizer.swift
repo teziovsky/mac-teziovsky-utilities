@@ -3,18 +3,32 @@ import UniformTypeIdentifiers
 
 /// Classifies files as media using UniformTypeIdentifiers.
 enum MediaFileClassifier {
+    /// Video containers recognised by extension even when no installed app declares a UTI
+    /// for them (e.g. MKV without IINA/VLC), so classification does not depend on the Mac.
+    static let knownVideoExtensions: Set<String> = [
+        "3gp", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "mxf",
+        "ogv", "qt", "vob", "webm", "wmv"
+    ]
+
     static func isMedia(_ filename: String) -> Bool {
+        if isVideo(filename) { return true }
         guard let type = utType(for: filename) else { return false }
         return type.conforms(to: .image)
             || type.conforms(to: .movie)
             || type.conforms(to: .audiovisualContent)
     }
 
+    /// Movies and video streams only. `.audiovisualContent` is deliberately not used: it also
+    /// matches pure audio (wav, m4a), which must not be treated or compressed as video.
     static func isVideo(_ filename: String) -> Bool {
-        guard let type = utType(for: filename) else { return false }
-        return type.conforms(to: .movie)
-            || type.conforms(to: .audiovisualContent)
-            || type.conforms(to: .video)
+        let ext = (filename as NSString).pathExtension
+        return isVideo(fileExtension: ext, type: utType(for: filename))
+    }
+
+    static func isVideo(fileExtension: String, type: UTType?) -> Bool {
+        if knownVideoExtensions.contains(fileExtension.lowercased()) { return true }
+        guard let type else { return false }
+        return type.conforms(to: .movie) || type.conforms(to: .video)
     }
 
     private static func utType(for filename: String) -> UTType? {
@@ -53,6 +67,18 @@ final class DroneFinalizer: ObservableObject {
     private var projectDirectory: URL?
     private var undoStack: [StepRecord] = []
     private var backupDirectory: URL?
+    private let trashItem: (URL) throws -> URL?
+
+    /// `trash` moves an item to the Trash and returns its new location (injectable for tests).
+    init(trash: @escaping (URL) throws -> URL? = DroneFinalizer.moveToSystemTrash) {
+        trashItem = trash
+    }
+
+    nonisolated static func moveToSystemTrash(_ url: URL) throws -> URL? {
+        var resultingURL: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+        return resultingURL as URL?
+    }
 
     var hasProject: Bool { projectDirectory != nil }
 
@@ -175,7 +201,7 @@ final class DroneFinalizer: ObservableObject {
 
                 if MediaFileClassifier.isVideo(fileName) {
                     do {
-                        let backupURL = try makeBackup(of: compressedURL, fileManager: fileManager)
+                        let backupURL = try await makeBackup(of: compressedURL, fileManager: fileManager)
                         ops.append(.restoreFile(target: compressedURL, backup: backupURL))
                         try await VideoMetadataTransfer.transfer(from: sourceURL, to: compressedURL)
                     } catch {
@@ -215,6 +241,11 @@ final class DroneFinalizer: ObservableObject {
                 let sourceURL = exportDir.appendingPathComponent(pair.sourceRelativePath)
                 let compressedURL = exportDir.appendingPathComponent(pair.compressedRelativePath)
                 let finalURL = exportDir.appendingPathComponent(pair.finalRelativePath)
+                let verification = await verifyCompressedCopy(of: pair, compressed: compressedURL, original: sourceURL)
+                if let note = verification.note {
+                    issues.append(note)
+                }
+                guard verification.canReplaceOriginal else { continue }
                 do {
                     if let trashed = try trash(sourceURL, fileManager: fileManager) {
                         ops.append(.untrash(original: sourceURL, trashed: trashed))
@@ -285,19 +316,61 @@ final class DroneFinalizer: ObservableObject {
             }
 
             if fileManager.fileExists(atPath: exportDir.path) {
-                statusMessage = "Moving \(config.exportDirectoryName)/ to Trash…"
-                do {
-                    if let trashed = try trash(exportDir, fileManager: fileManager) {
-                        ops.append(.untrash(original: exportDir, trashed: trashed))
-                    }
-                } catch {
-                    issues.append(OrganizeFailure(filename: config.exportDirectoryName, message: error.localizedDescription))
-                }
+                trashExportDirectoryIfEmpty(exportDir, ops: &ops, issues: &issues, fileManager: fileManager)
             }
 
             failures = issues
             pushUndo(step: .flatten, ops: ops)
             advance(to: .done)
+        }
+    }
+
+    /// Only an emptied export folder goes to the Trash. Anything still inside (non-media files,
+    /// conflicts, failed moves) was never shown as "will be deleted", so the folder is kept.
+    private func trashExportDirectoryIfEmpty(
+        _ exportDir: URL,
+        ops: inout [ReversibleOp],
+        issues: inout [OrganizeFailure],
+        fileManager: FileManager
+    ) {
+        let remaining = (try? DroneMediaPaths.regularFiles(relativeTo: exportDir)) ?? []
+        guard remaining.isEmpty else {
+            let listed = remaining.prefix(5).joined(separator: ", ")
+            let more = remaining.count > 5 ? " and \(remaining.count - 5) more" : ""
+            issues.append(OrganizeFailure(
+                filename: "\(config.exportDirectoryName)/",
+                message: "Kept because it still contains \(listed)\(more)."
+            ))
+            return
+        }
+        statusMessage = "Moving \(config.exportDirectoryName)/ to Trash…"
+        do {
+            if let trashed = try trash(exportDir, fileManager: fileManager) {
+                ops.append(.untrash(original: exportDir, trashed: trashed))
+            }
+        } catch {
+            issues.append(OrganizeFailure(filename: config.exportDirectoryName, message: error.localizedDescription))
+        }
+    }
+
+    /// Guards the destructive cleanup: a video original is only trashed when its compressed
+    /// copy is a complete, playable file.
+    private func verifyCompressedCopy(
+        of pair: DroneMatchedPair,
+        compressed: URL,
+        original: URL
+    ) async -> (canReplaceOriginal: Bool, note: OrganizeFailure?) {
+        guard MediaFileClassifier.isVideo((pair.compressedRelativePath as NSString).lastPathComponent) else {
+            return (true, nil)
+        }
+        statusMessage = "Verifying \(pair.compressedRelativePath)…"
+        switch await CompressedVideoVerifier.verify(compressed: compressed, original: original) {
+        case .valid:
+            return (true, nil)
+        case .unverifiable(let reason):
+            return (true, OrganizeFailure(filename: pair.compressedRelativePath, message: reason))
+        case .invalid(let reason):
+            return (false, OrganizeFailure(filename: pair.compressedRelativePath, message: "Original kept: \(reason)"))
         }
     }
 
@@ -374,10 +447,14 @@ final class DroneFinalizer: ObservableObject {
         canUndo = true
     }
 
-    private func makeBackup(of url: URL, fileManager: FileManager) throws -> URL {
+    /// Copies off the main actor: a compressed 4K export can be gigabytes, and the copy is a
+    /// full one when the project sits on an external drive.
+    private func makeBackup(of url: URL, fileManager: FileManager) async throws -> URL {
         let directory = try backupDir(fileManager: fileManager)
         let backupURL = directory.appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
-        try fileManager.copyItem(at: url, to: backupURL)
+        try await Task.detached(priority: .userInitiated) {
+            try FileManager.default.copyItem(at: url, to: backupURL)
+        }.value
         return backupURL
     }
 
@@ -398,9 +475,7 @@ final class DroneFinalizer: ObservableObject {
     }
 
     private func trash(_ url: URL, fileManager: FileManager) throws -> URL? {
-        var resultingURL: NSURL?
-        try fileManager.trashItem(at: url, resultingItemURL: &resultingURL)
-        return resultingURL as URL?
+        try trashItem(url)
     }
 
     private func ensureParentExists(of url: URL, fileManager: FileManager) throws {

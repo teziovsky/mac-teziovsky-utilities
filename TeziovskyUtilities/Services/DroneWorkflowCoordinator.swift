@@ -12,7 +12,7 @@ final class DroneWorkflowCoordinator: ObservableObject {
     @Published private(set) var previewError: String?
     @Published private(set) var scanMessage: String?
 
-    let finalizer = DroneFinalizer()
+    let finalizer: DroneFinalizer
     let compressionSession = HandBrakeCompressionSession()
     let presetLoader = HandBrakePresetLoader()
 
@@ -21,8 +21,9 @@ final class DroneWorkflowCoordinator: ObservableObject {
 
     var hasProject: Bool { projectDirectory != nil }
 
-    init() {
-        finalizer.objectWillChange
+    init(finalizer: DroneFinalizer? = nil) {
+        self.finalizer = finalizer ?? DroneFinalizer()
+        self.finalizer.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
         compressionSession.objectWillChange
@@ -31,6 +32,18 @@ final class DroneWorkflowCoordinator: ObservableObject {
         presetLoader.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        // Finalize steps finish asynchronously; follow the finalizer instead of polling it.
+        self.finalizer.$step
+            .sink { [weak self] step in self?.finalizerStepChanged(to: step) }
+            .store(in: &cancellables)
+    }
+
+    private func finalizerStepChanged(to step: DroneFinalizeStep) {
+        if step == .done, phase == .finalize {
+            phase = .done
+        } else if step != .done, phase == .done {
+            phase = .finalize
+        }
     }
 
     private var cancellables = Set<AnyCancellable>()
@@ -140,7 +153,8 @@ final class DroneWorkflowCoordinator: ObservableObject {
             projectDirectory: projectDirectory,
             exports: uncompressedExports,
             config: config,
-            preset: selectedPreset
+            preset: selectedPreset,
+            importGUIPresets: presetLoader.includesGUIPresets
         )
     }
 
@@ -157,12 +171,23 @@ final class DroneWorkflowCoordinator: ObservableObject {
 
     func performFinalizeStep() {
         finalizer.performCurrentStep()
-        if finalizer.step == .done {
-            phase = .done
-        }
     }
 
+    var canUndoFinalizeStep: Bool {
+        (phase == .finalize || phase == .done) && finalizer.canUndo && !finalizer.isRunning
+    }
+
+    /// Reverts the last finalize step (restores trashed files, undoes renames and moves).
+    /// Deliberately separate from `goBack()`, which only navigates.
+    func undoLastFinalizeStep() {
+        guard canUndoFinalizeStep else { return }
+        finalizer.goBack()
+    }
+
+    /// Navigates to the previous phase. Never touches files: once a finalize step has changed
+    /// the project, going back requires the explicit `undoLastFinalizeStep()`.
     func goBack() {
+        guard canGoBack else { return }
         switch phase {
         case .validateLayout:
             break
@@ -175,25 +200,18 @@ final class DroneWorkflowCoordinator: ObservableObject {
         case .compress:
             phase = .pickPreset
         case .finalize:
-            if finalizer.canUndo {
-                finalizer.goBack()
-            } else {
-                phase = .compress
-            }
+            phase = compressionSession.progress == nil ? .scanExport : .compress
         case .done:
-            if finalizer.canUndo {
-                finalizer.goBack()
-                phase = .finalize
-            } else {
-                phase = .finalize
-            }
+            break
         }
     }
 
     var canGoBack: Bool {
         switch phase {
-        case .validateLayout:
+        case .validateLayout, .done:
             return false
+        case .finalize:
+            return !finalizer.canUndo
         default:
             return true
         }

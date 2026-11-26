@@ -14,28 +14,33 @@ Native macOS app for organizing media. From a home screen you pick a workflow:
 
 - Browse non-empty albums (hide albums ending with a configurable suffix, default `_zgrane`)
 - Lazy thumbnail **views** for large albums (PhotoKit loads item metadata per album; grid rows render on demand)
-- Choose an export folder and **Organize** to copy originals with progress and cancel
+- Choose an export folder and **Organize** to copy files with progress and cancel
+- Files are written byte-for-byte as stored in Photos (no re-encoding, no metadata rewrite); only Finder Created/Modified are set, from the file's own EXIF capture time
+- Edited photos export their edited render by default; turn this off in Settings → Photos to export unmodified originals
+- Live Photo motion (`.MOV`) and RAW alternates are saved next to the photo with the same base name (Settings → Photos)
 - Quick Look preview for the selected item (⌘Y)
 
 ### Organize Drone Footage
 
 Point the app at a project folder that contains a `raw/` and an `export/` subfolder (names configurable in Settings → Drone). The finalize action runs fully natively:
 
-1. For every compressed file in `export/` (name ending with the configurable suffix, default `_COMPRESSED`), match its source original, copy the source's creation/modification dates (and, for video, best-effort QuickTime creation date / location via AVFoundation passthrough) onto the compressed file, delete the source, and rename the compressed file to drop the suffix.
-2. Move the remaining images and videos from `export/` up one level into the project root.
-3. Remove the now-empty `raw/` and `export/` folders.
+1. For every compressed file in `export/` (name ending with the configurable suffix, default `_COMPRESSED`), match its source original, copy the source's creation/modification dates (and, for video, best-effort QuickTime creation date / location via AVFoundation passthrough) onto the compressed file, move the source to the Trash, and rename the compressed file to drop the suffix. A compressed video only replaces its original after it is verified to be playable and as long as the original.
+2. Move the remaining images and videos from `export/` up into the project folder (keeping `vertical/` / `horizontal/` unless disabled in Settings).
+3. Move `export/` to the Trash once it is empty, and `raw/` only if "Keep raw/ after finalize" is off (it is kept by default). Files that are not part of the delivery (e.g. `.drp`, `.srt`, naming conflicts) are listed in the preview and left in `export/`, which is then kept.
 
-The result is the finished media sitting directly in the project folder with no subdirectories. A preview lists every planned action before anything is changed (the operation deletes files). Video compression itself stays in HandBrake — this app handles the post-compression finalize.
+A preview lists every planned action before anything is changed, destructive steps ask for confirmation, and each step can be reverted with **Undo Last Step** (⌘Z). Esc and Go Back only navigate; they never change files.
+
+Compression runs HandBrakeCLI with per-file progress and ETA. Output is written to a hidden `.partial` file and only renamed after HandBrakeCLI succeeds, so a failed, cancelled or interrupted encode never looks like a finished compressed copy. Cancel stops the running encode, and the Mac is kept awake while compressing.
 
 ### Organize Local Photos
 
 Choose a folder to scan supported media recursively. Hidden entries, packages, and symbolic links are skipped. Nothing changes during scanning. The workflow separately previews media conversion, date repairs, and file organization, and only applies a step after explicit confirmation.
 
-HEIC/HEIF images can be converted to JPEG at maximum quality. Legacy or unsupported videos can be re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
+HEIC/HEIF images can be converted to JPEG at maximum quality. Videos in old containers (M4V, 3GP, MTS, …) that already use modern streams are rewrapped into MP4/MOV without re-encoding; videos with legacy codecs are re-encoded as H.264 + AAC in MP4 by default for widest compatibility. Videos macOS cannot read (e.g. MKV, WMV, FLV, WebM) are listed as unsupported instead of failing mid-conversion, and a file that already has its converted twin next to it is not converted again. Settings → Local Media can disable either conversion, select H.264 or HEVC, select MP4 or QuickTime MOV, and choose whether originals are kept. Converted files are verified and inherit the original filesystem dates before an original is removed; keeping originals is enabled by default.
 
-For date repair, the app compares Finder Created, Finder Modified, and available EXIF, TIFF, or video-container dates. Files whose dates do not all match the oldest valid date are listed with the current date, proposed date, and source. Repair synchronizes those dates to the oldest valid date found. The original file is backed up during each repair so a failed metadata rewrite can be rolled back.
+For date repair, the app compares Finder Created, Finder Modified, and available EXIF, TIFF, or video-container dates. EXIF dates are read together with their `OffsetTime*` fields, so photos taken in another time zone are not shifted. Placeholder timestamps from zeroed fields or reset clocks (1904, 1970 and 1980 epochs, midnight on 1 January 2000/2001) are ignored. Files whose dates do not all match the oldest valid date are listed with the current date, proposed date, and source. Repair synchronizes those dates to the oldest valid date found. Image metadata is rewritten without re-encoding (pixels stay identical) and existing offsets are kept. The original file is backed up during each repair so a failed metadata rewrite can be rolled back.
 
-For organization, each file uses that same oldest valid date. Photos move to `CURRENT_PARENT/YYYY/`; videos move to `CURRENT_PARENT/YYYY/_Filmy/`. Files already in the computed destination are skipped. A file under an incorrect year moves to the correct sibling year. Existing destination names are preserved by numbering the incoming file, for example `photo (1).jpg`. Empty source folders are left in place. Supported extensions are editable in Settings → Local Media.
+For organization, each file uses that same oldest valid date. Photos move to `CURRENT_PARENT/YYYY/`; videos move to `CURRENT_PARENT/YYYY/_Filmy/`. The motion part of a Live Photo (a `.MOV` with the same name as a HEIC/JPEG in the same folder) stays next to its still and keeps the still's final name. Files already in the computed destination are skipped. A file under an incorrect year moves to the correct sibling year; if that sibling lies outside the scanned folder, the file is reported instead. Only 4-digit names from 1900 to next year count as year folders. Scans also report backups and temporary files left by an interrupted repair. Existing destination names are preserved by numbering the incoming file, for example `photo (1).jpg`. Empty source folders are left in place. Supported extensions are editable in Settings → Local Media.
 
 ### First launch
 
@@ -108,9 +113,11 @@ Set your development team in Xcode for signed release builds outside this repo (
 
 ## Settings
 
-- **Excluded album suffix** — albums whose names end with this suffix are hidden (default: `_zgrane`)
+- **Excluded album suffix** — albums whose names end with this suffix are hidden (default: `_zgrane`); organized items move to `<album><suffix>`, so Organize is disabled while it is empty
 - **Omit from Organize** — hide albums from the sidebar and disable Organize for them
 - **Export folder** — destination for the Organize action
+- **Export edited versions when available** — export the edited render (default) or the unmodified original
+- **Include Live Photo videos and RAW originals** — save companion files next to the exported photo (default on)
 - **Drone → Compressed suffix** — suffix HandBrake adds to compressed files (default: `_COMPRESSED`)
 - **Drone → Raw / Export folder names** — subfolder names used by the drone finalize step (defaults: `raw`, `export`)
 - **Local Media → File extensions** — media extensions included by local conversion, date repair, and organization

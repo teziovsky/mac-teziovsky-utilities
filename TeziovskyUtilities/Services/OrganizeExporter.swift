@@ -13,8 +13,9 @@ final class OrganizeExporter: ObservableObject {
 
     private var exportTask: Task<Void, Never>?
     private var onFinished: (@MainActor () async -> Void)?
-    private let directoryAccess = ExportDirectoryAccess()
-    private let sleepAssertion = SleepAssertion()
+    /// Identifies the current run. A cancelled run keeps finishing its in-flight item in the
+    /// background and must not overwrite the state of a run started after it.
+    private var runID: UUID?
 
     func organize(
         items: [MediaItem],
@@ -26,9 +27,6 @@ final class OrganizeExporter: ObservableObject {
     ) {
         cancel()
         failures = []
-        isRunning = true
-        self.onFinished = onFinished
-        destinationAlbumTitle = PhotosService.destinationAlbumTitle(forSourceAlbumNamed: sourceAlbum.name)
         progress = OrganizeProgress(
             current: 0,
             total: items.count,
@@ -39,168 +37,174 @@ final class OrganizeExporter: ObservableObject {
             isComplete: false,
             wasCancelled: false
         )
-
-        if items.count >= Self.largeAlbumSleepThreshold {
-            sleepAssertion.acquire(
-                reason: "Exporting \(items.count) items from “\(sourceAlbum.name)”"
-            )
+        guard let targetTitle = PhotosService.destinationAlbumTitle(forSourceAlbumNamed: sourceAlbum.name) else {
+            destinationAlbumTitle = nil
+            failures = [OrganizeFailure(
+                filename: "",
+                message: "Set an album suffix in Settings → Photos first; it names the album organized items move to."
+            )]
+            progress = progress.map { finished($0, cancelled: false) }
+            return
         }
 
-        let targetTitle = destinationAlbumTitle!
+        isRunning = true
+        self.onFinished = onFinished
+        destinationAlbumTitle = targetTitle
+        let runID = UUID()
+        self.runID = runID
+        let sleepAssertion = SleepAssertion()
+        if items.count >= Self.largeAlbumSleepThreshold {
+            sleepAssertion.acquire(reason: "Exporting \(items.count) items from “\(sourceAlbum.name)”")
+        }
+
         photosService.beginDeferringAlbumReloadFromLibraryChanges()
+        let request = OrganizeRequest(
+            sourceAlbum: sourceAlbum,
+            targetAlbumTitle: targetTitle,
+            exportDirectory: exportDirectory,
+            photosService: photosService
+        )
         exportTask = Task {
-            await runOrganize(
-                items: items,
-                assetsByID: assetsByID,
-                sourceAlbum: sourceAlbum,
-                targetAlbumTitle: targetTitle,
-                exportDirectory: exportDirectory,
-                photosService: photosService
-            )
+            await runOrganize(items: items, assetsByID: assetsByID, request: request, runID: runID)
+            sleepAssertion.release()
         }
     }
 
     func cancel() {
         exportTask?.cancel()
         exportTask = nil
-        if isRunning {
-            let current = progress?.current ?? 0
-            let total = progress?.total ?? 0
-            progress = OrganizeProgress(
-                current: current,
-                total: total,
-                filename: progress?.filename ?? "",
-                failedCount: progress?.failedCount ?? 0,
-                skippedCount: progress?.skippedCount ?? 0,
-                movedCount: progress?.movedCount ?? 0,
-                isComplete: true,
-                wasCancelled: true
-            )
+        if isRunning, let current = progress {
+            progress = finished(current, cancelled: true)
         }
         isRunning = false
-        directoryAccess.endAccess()
-        sleepAssertion.release()
+        runID = nil
+    }
+
+    private func finished(_ progress: OrganizeProgress, cancelled: Bool) -> OrganizeProgress {
+        OrganizeProgress(
+            current: progress.current,
+            total: progress.total,
+            filename: "",
+            failedCount: progress.failedCount,
+            skippedCount: progress.skippedCount,
+            movedCount: progress.movedCount,
+            isComplete: true,
+            wasCancelled: cancelled
+        )
     }
 
     private func runOrganize(
         items: [MediaItem],
         assetsByID: [String: PHAsset],
-        sourceAlbum: PhotoAlbum,
-        targetAlbumTitle: String,
-        exportDirectory: URL,
-        photosService: PhotosService
+        request: OrganizeRequest,
+        runID: UUID
     ) async {
+        let directoryAccess = ExportDirectoryAccess()
+        defer { directoryAccess.endAccess() }
         guard let scopedDirectory = directoryAccess.beginAccess() else {
-            await finishWithAccessError(items: items)
-            await photosService.endDeferringAlbumReloadFromLibraryChanges()
+            if self.runID == runID {
+                finishWithAccessError(items: items)
+            }
+            await request.photosService.endDeferringAlbumReloadFromLibraryChanges()
             return
         }
+        try? FileManager.default.createDirectory(at: scopedDirectory, withIntermediateDirectories: true)
 
-        let fileManager = FileManager.default
-        try? fileManager.createDirectory(at: scopedDirectory, withIntermediateDirectories: true)
+        // Captured once so a Settings change mid-run cannot mix export styles in one album.
+        let options = ExportOptions(
+            preferEdited: AppSettings.photosExportEditedVersions,
+            includeCompanions: AppSettings.photosExportCompanionFiles,
+            organizeByYear: AppSettings.organizeByYearEnabled
+        )
+        var tally = OrganizeTally()
 
-        var failedCount = 0
-        var skippedCount = 0
-        var movedCount = 0
-        var failureList: [OrganizeFailure] = []
-
-        for (index, item) in items.enumerated() {
+        for item in items {
             if Task.isCancelled { break }
-
-            await MainActor.run {
-                progress = OrganizeProgress(
-                    current: index,
-                    total: items.count,
-                    filename: item.filename,
-                    failedCount: failedCount,
-                    skippedCount: skippedCount,
-                    movedCount: movedCount,
-                    isComplete: false,
-                    wasCancelled: false
-                )
+            if self.runID == runID {
+                progress = tally.progress(total: items.count, filename: item.filename, isComplete: false)
             }
-
-            guard let asset = assetsByID[item.id] else {
-                failedCount += 1
-                failureList.append(OrganizeFailure(filename: item.filename, message: "Asset not found"))
-                continue
-            }
-
-            let safeName = SafeFilename.sanitize(item.filename, fallback: item.id)
-            let itemCreationDate = asset.creationDate ?? asset.modificationDate ?? Date()
-            let itemDirectory = OrganizeExportDirectory.exportDirectory(
-                base: scopedDirectory,
-                selectedDirectoryName: exportDirectory.lastPathComponent,
-                creationDate: itemCreationDate,
-                organizeByYearEnabled: AppSettings.organizeByYearEnabled
+            let outcome = await organize(
+                item,
+                asset: assetsByID[item.id],
+                request: request,
+                scopedDirectory: scopedDirectory,
+                options: options
             )
-            try? fileManager.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
-            let destination = uniqueDestinationURL(
-                directory: itemDirectory,
-                filename: safeName,
-                fileManager: fileManager
-            )
-
-            guard let destination else {
-                failedCount += 1
-                failureList.append(OrganizeFailure(filename: item.filename, message: "Invalid export path"))
-                continue
-            }
-
-            do {
-                try await exportAsset(asset, to: destination)
-                try await photosService.moveAsset(
-                    asset,
-                    fromSourceAlbum: sourceAlbum,
-                    toAlbumNamed: targetAlbumTitle
-                )
-                movedCount += 1
-            } catch {
-                if error is OrganizeSkipError {
-                    skippedCount += 1
-                    failureList.append(OrganizeFailure(filename: item.filename, message: error.localizedDescription))
-                } else {
-                    failedCount += 1
-                    failureList.append(
-                        OrganizeFailure(
-                            filename: item.filename,
-                            message: error.localizedDescription
-                        )
-                    )
-                }
-            }
+            tally.record(outcome, for: item)
         }
 
         let cancelled = Task.isCancelled
-        let finished = onFinished
-        onFinished = nil
-
-        await MainActor.run {
-            failures = failureList
-            progress = OrganizeProgress(
-                current: items.count,
-                total: items.count,
-                filename: "",
-                failedCount: failedCount,
-                skippedCount: skippedCount,
-                movedCount: movedCount,
-                isComplete: true,
-                wasCancelled: cancelled
-            )
+        // After cancel() this run no longer owns the UI unless no newer run has started.
+        let ownsState = self.runID == runID || self.runID == nil
+        if ownsState {
+            failures = tally.failures
+            progress = tally.progress(total: items.count, filename: "", isComplete: true, wasCancelled: cancelled)
+        }
+        if self.runID == runID {
             isRunning = false
             exportTask = nil
+            self.runID = nil
         }
+        let finishedHandler = ownsState ? onFinished : nil
+        if ownsState { onFinished = nil }
 
-        directoryAccess.endAccess()
-        sleepAssertion.release()
-
-        await photosService.endDeferringAlbumReloadFromLibraryChanges()
+        await request.photosService.endDeferringAlbumReloadFromLibraryChanges()
         if !cancelled {
-            await finished?()
+            await finishedHandler?()
         }
     }
 
-    private func finishWithAccessError(items: [MediaItem]) async {
+    private func organize(
+        _ item: MediaItem,
+        asset: PHAsset?,
+        request: OrganizeRequest,
+        scopedDirectory: URL,
+        options: ExportOptions
+    ) async -> OrganizeItemOutcome {
+        guard let asset else {
+            return .failed("Asset not found")
+        }
+        let safeName = SafeFilename.sanitize(item.filename, fallback: item.id)
+        let itemDirectory = OrganizeExportDirectory.exportDirectory(
+            base: scopedDirectory,
+            selectedDirectoryName: request.exportDirectory.lastPathComponent,
+            creationDate: asset.creationDate ?? asset.modificationDate ?? Date(),
+            organizeByYearEnabled: options.organizeByYear
+        )
+        try? FileManager.default.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
+
+        do {
+            // A previous run may have exported this asset but failed to move it: reuse that
+            // file instead of writing a numbered duplicate.
+            let alreadyExported = PhotoAssetExporter.existingExport(
+                ofAssetIdentifier: asset.localIdentifier,
+                filename: safeName,
+                in: itemDirectory
+            ) != nil
+            if !alreadyExported {
+                guard let destination = uniqueDestinationURL(
+                    directory: itemDirectory,
+                    filename: safeName,
+                    fileManager: .default
+                ) else {
+                    return .failed("Invalid export path")
+                }
+                try await exportAsset(asset, to: destination, options: options)
+            }
+            try await request.photosService.moveAsset(
+                asset,
+                fromSourceAlbum: request.sourceAlbum,
+                toAlbumNamed: request.targetAlbumTitle
+            )
+            return .moved
+        } catch is OrganizeSkipError {
+            return .skipped(OrganizeSkipError.iCloudOnly.localizedDescription)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func finishWithAccessError(items: [MediaItem]) {
         failures = [
             OrganizeFailure(
                 filename: "",
@@ -220,15 +224,16 @@ final class OrganizeExporter: ObservableObject {
         isRunning = false
         exportTask = nil
         onFinished = nil
-        sleepAssertion.release()
+        runID = nil
     }
 
-    private func exportAsset(_ asset: PHAsset, to destination: URL) async throws {
+    private func exportAsset(_ asset: PHAsset, to destination: URL, options: ExportOptions) async throws {
         do {
-            try await PhotoAssetExporter.writeOriginalResource(
+            try await PhotoAssetExporter.writeResources(
                 for: asset,
                 to: destination,
-                skipWriteIfFileExists: true
+                preferEdited: options.preferEdited,
+                includeCompanions: options.includeCompanions
             )
         } catch let error as PhotoAssetExportError {
             switch error {
@@ -267,6 +272,60 @@ final class OrganizeExporter: ObservableObject {
 
     private func fileManagerExists(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path)
+    }
+}
+
+private struct ExportOptions {
+    let preferEdited: Bool
+    let includeCompanions: Bool
+    let organizeByYear: Bool
+}
+
+private struct OrganizeRequest {
+    let sourceAlbum: PhotoAlbum
+    let targetAlbumTitle: String
+    let exportDirectory: URL
+    let photosService: PhotosService
+}
+
+private enum OrganizeItemOutcome {
+    case moved
+    case skipped(String)
+    case failed(String)
+}
+
+private struct OrganizeTally {
+    var processed = 0
+    var moved = 0
+    var skipped = 0
+    var failed = 0
+    var failures: [OrganizeFailure] = []
+
+    mutating func record(_ outcome: OrganizeItemOutcome, for item: MediaItem) {
+        processed += 1
+        switch outcome {
+        case .moved:
+            moved += 1
+        case .skipped(let message):
+            skipped += 1
+            failures.append(OrganizeFailure(filename: item.filename, message: message))
+        case .failed(let message):
+            failed += 1
+            failures.append(OrganizeFailure(filename: item.filename, message: message))
+        }
+    }
+
+    func progress(total: Int, filename: String, isComplete: Bool, wasCancelled: Bool = false) -> OrganizeProgress {
+        OrganizeProgress(
+            current: processed,
+            total: total,
+            filename: filename,
+            failedCount: failed,
+            skippedCount: skipped,
+            movedCount: moved,
+            isComplete: isComplete,
+            wasCancelled: wasCancelled
+        )
     }
 }
 

@@ -21,7 +21,7 @@ struct LocalPhotosModeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var step: LocalPhotosWorkflowStep = .convert
 
-    private var service: LocalPhotosService { appState.localPhotosService }
+    @ObservedObject var service: LocalPhotosService
 
     var body: some View {
         ScrollView {
@@ -67,10 +67,11 @@ struct LocalPhotosModeView: View {
             }
         }
         .onEscape {
+            // Esc cancels work in progress, but never silently discards finished scan results;
+            // leaving with results requires the explicit Home button.
             if service.isRunning {
                 service.cancel()
-            } else {
-                service.reset()
+            } else if service.directory == nil {
                 appState.goHome()
             }
         }
@@ -513,6 +514,7 @@ private struct LocalMediaConversionRow: View {
         switch item.kind {
         case .heicToJPEG: return "photo.badge.arrow.down"
         case .legacyVideo: return "film.stack"
+        case .remuxVideo: return "shippingbox"
         }
     }
 }

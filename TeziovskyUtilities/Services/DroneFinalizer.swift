@@ -10,11 +10,11 @@ enum MediaFileClassifier {
             || type.conforms(to: .audiovisualContent)
     }
 
+    /// Movies and video streams only. `.audiovisualContent` is deliberately not used: it also
+    /// matches pure audio (wav, m4a), which must not be treated or compressed as video.
     static func isVideo(_ filename: String) -> Bool {
         guard let type = utType(for: filename) else { return false }
-        return type.conforms(to: .movie)
-            || type.conforms(to: .audiovisualContent)
-            || type.conforms(to: .video)
+        return type.conforms(to: .movie) || type.conforms(to: .video)
     }
 
     private static func utType(for filename: String) -> UTType? {

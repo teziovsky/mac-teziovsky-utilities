@@ -17,7 +17,7 @@ enum DroneExportScanner {
     static func uncompressedExports(
         projectDirectory: URL,
         config: DroneFinalizeConfig,
-        isMedia: (String) -> Bool = { MediaFileClassifier.isMedia($0) }
+        isVideo: (String) -> Bool = { MediaFileClassifier.isVideo($0) }
     ) throws -> [DroneUncompressedExport] {
         let exportDir = projectDirectory.appendingPathComponent(config.exportDirectoryName, isDirectory: true)
         let files = try DroneMediaPaths.regularFiles(relativeTo: exportDir)
@@ -26,7 +26,8 @@ enum DroneExportScanner {
 
         return files.compactMap { relativePath in
             let fileName = (relativePath as NSString).lastPathComponent
-            guard isMedia(fileName) else { return nil }
+            // Only video goes to HandBrake; stills and audio stay as they are.
+            guard isVideo(fileName) else { return nil }
             guard !DroneFinalizePlanBuilder.hasCompressedSuffix(fileName, suffix: suffix) else { return nil }
 
             let compressedRelative = compressedRelativePath(for: relativePath, config: config)

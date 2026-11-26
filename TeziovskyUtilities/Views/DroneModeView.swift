@@ -159,6 +159,7 @@ struct DroneModeView: View {
                 progress: workflow.compressionSession.progress,
                 isRunning: workflow.compressionSession.isRunning,
                 onStart: { workflow.startCompression() },
+                onCancel: { workflow.compressionSession.cancel() },
                 action: { workflow.continueFromCompression() }
             )
         case .finalize:
@@ -466,28 +467,57 @@ private struct DroneCompressStepView: View {
     let progress: HandBrakeCompressionProgress?
     let isRunning: Bool
     let onStart: () -> Void
+    let onCancel: () -> Void
     let action: () -> Void
 
     private var isComplete: Bool { progress?.isComplete == true }
 
+    private var description: String {
+        "Compress \(exports.count) export\(exports.count == 1 ? "" : "s") with preset “\(preset)” using HandBrakeCLI."
+    }
+
     var body: some View {
         DroneWorkflowStepContainer(
             phase: .compress,
-            description: "Compress \(exports.count) export\(exports.count == 1 ? "" : "s") with preset “\(preset)” using HandBrakeCLI.",
+            description: description,
             isRunning: isRunning,
-            statusMessage: progress.map { "Compressing \($0.filename) (\($0.current)/\($0.total))" },
+            statusMessage: progress.map(Self.statusMessage),
             actionTitle: isComplete ? "Continue to finalize" : "Start compression",
             actionRole: nil,
             actionDisabled: isRunning || (!isComplete && preset.isEmpty),
             action: isComplete ? action : onStart
         ) {
             if let progress, isRunning || isComplete {
-                ProgressView(value: Double(progress.current), total: Double(max(progress.total, 1)))
-                Text("\(progress.current) of \(progress.total) complete")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                ProgressView(value: progress.overallFraction)
+                HStack {
+                    Text(Self.summary(progress))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isRunning {
+                        Button("Cancel", role: .cancel, action: onCancel)
+                            .pillActionButton()
+                            .help("Stop HandBrakeCLI; the unfinished file is discarded")
+                    }
+                }
             }
         }
+    }
+
+    private static func statusMessage(_ progress: HandBrakeCompressionProgress) -> String {
+        var parts = ["Compressing \(progress.filename) (\(progress.current)/\(progress.total))"]
+        parts.append("\(Int((progress.fileFraction * 100).rounded(.down)))%")
+        if let eta = progress.eta {
+            parts.append("ETA \(eta)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func summary(_ progress: HandBrakeCompressionProgress) -> String {
+        if progress.wasCancelled {
+            return "Cancelled after \(progress.completed) of \(progress.total)"
+        }
+        return "\(progress.completed) of \(progress.total) complete"
     }
 }
 

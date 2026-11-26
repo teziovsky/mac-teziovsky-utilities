@@ -1,11 +1,55 @@
 import Foundation
 
 struct HandBrakeCompressionProgress: Equatable, Sendable {
+    /// 1-based index of the file being encoded.
     var current: Int
+    /// Files finished (successfully or not).
+    var completed: Int
     var total: Int
     var filename: String
+    /// Progress of the current file, 0...1, as reported by HandBrakeCLI.
+    var fileFraction: Double
+    var eta: String?
     var isComplete: Bool
     var wasCancelled: Bool
+
+    /// Overall fraction across all files.
+    var overallFraction: Double {
+        guard total > 0 else { return 0 }
+        let inFlight = isComplete ? 0 : min(max(fileFraction, 0), 1)
+        return min((Double(completed) + inFlight) / Double(total), 1)
+    }
+}
+
+struct HandBrakeFileProgress: Equatable, Sendable {
+    var fraction: Double
+    var eta: String?
+}
+
+/// Parses HandBrakeCLI's `Encoding: task 1 of 2, 12.34 % (…, ETA 00h01m23s)` status lines.
+enum HandBrakeProgressParser {
+    // swiftlint:disable:next force_try
+    private static let pattern = try! NSRegularExpression(
+        pattern: #"Encoding: task (\d+) of (\d+), ([0-9]+(?:\.[0-9]+)?) %(?:[^\r\n]*?ETA ([0-9]+h[0-9]{2}m[0-9]{2}s))?"#
+    )
+
+    static func lastProgress(in text: String) -> HandBrakeFileProgress? {
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = pattern.matches(in: text, range: range).last,
+              let task = Double(substring(text, match.range(at: 1)) ?? ""),
+              let tasks = Double(substring(text, match.range(at: 2)) ?? ""),
+              let percent = Double(substring(text, match.range(at: 3)) ?? ""),
+              tasks > 0 else {
+            return nil
+        }
+        let fraction = ((task - 1) + percent / 100) / tasks
+        return HandBrakeFileProgress(fraction: min(max(fraction, 0), 1), eta: substring(text, match.range(at: 4)))
+    }
+
+    private static func substring(_ text: String, _ range: NSRange) -> String? {
+        guard range.location != NSNotFound, let swiftRange = Range(range, in: text) else { return nil }
+        return String(text[swiftRange])
+    }
 }
 
 enum HandBrakeCompressorError: LocalizedError {
@@ -30,32 +74,64 @@ enum HandBrakeCompressor {
         let output = try await runCLI(
             executable: cliURL,
             arguments: ["--preset-list"],
-            currentFileLabel: nil
+            failureLabel: nil
         )
         return parsePresetNames(from: output)
     }
 
+    /// Encodes `inputURL` into a hidden `.partial` sibling and moves it to `outputURL` only after
+    /// HandBrakeCLI exits successfully. A failed, cancelled or interrupted encode therefore never
+    /// leaves a file that looks like a finished compressed copy.
     static func compress(
         cliURL: URL,
         inputURL: URL,
         outputURL: URL,
-        preset: String
+        preset: String,
+        onProgress: @escaping @Sendable (HandBrakeFileProgress) -> Void = { _ in }
     ) async throws {
+        let fileManager = FileManager.default
         let parent = outputURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
+        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        let partialURL = partialOutputURL(for: outputURL)
+        try? fileManager.removeItem(at: partialURL)
 
-        _ = try await runCLI(
-            executable: cliURL,
-            arguments: [
-                "--input", inputURL.path,
-                "--output", outputURL.path,
-                "--preset", preset
-            ],
-            currentFileLabel: inputURL.lastPathComponent
-        )
+        do {
+            _ = try await runCLI(
+                executable: cliURL,
+                arguments: [
+                    "--input", inputURL.path,
+                    "--output", partialURL.path,
+                    "--preset", preset
+                ],
+                failureLabel: inputURL.lastPathComponent,
+                onOutput: { recentText in
+                    if let progress = HandBrakeProgressParser.lastProgress(in: recentText) {
+                        onProgress(progress)
+                    }
+                }
+            )
+            try Task.checkCancellation()
+            guard fileManager.fileExists(atPath: partialURL.path) else {
+                throw HandBrakeCompressorError.compressionFailed(
+                    "\(inputURL.lastPathComponent): HandBrakeCLI finished without writing an output file."
+                )
+            }
+            if fileManager.fileExists(atPath: outputURL.path) {
+                try fileManager.removeItem(at: outputURL)
+            }
+            try fileManager.moveItem(at: partialURL, to: outputURL)
+        } catch {
+            try? fileManager.removeItem(at: partialURL)
+            throw error
+        }
+    }
+
+    /// Hidden (so scanners skip it) and with the real extension (HandBrake picks the container from it).
+    static func partialOutputURL(for outputURL: URL) -> URL {
+        let base = outputURL.deletingPathExtension().lastPathComponent
+        let ext = outputURL.pathExtension
+        let name = ext.isEmpty ? ".\(base).partial" : ".\(base).partial.\(ext)"
+        return outputURL.deletingLastPathComponent().appendingPathComponent(name)
     }
 
     static func parsePresetNames(from output: String) -> [String] {
@@ -80,40 +156,127 @@ enum HandBrakeCompressor {
             .sorted()
     }
 
-    private static func runCLI(
+    /// Runs a CLI tool, draining stdout/stderr while it runs (a full pipe would block the tool
+    /// forever) and terminating it when the calling task is cancelled.
+    static func runCLI(
         executable: URL,
         arguments: [String],
-        currentFileLabel: String?
+        failureLabel: String?,
+        onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = arguments
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
 
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            process.terminationHandler = { process in
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                let combined = String(data: outData + errData, encoding: .utf8) ?? ""
-
-                if process.terminationStatus == 0 {
-                    continuation.resume(returning: combined)
+        let collector = ProcessOutputCollector(onRecentText: onOutput)
+        let drained = DispatchGroup()
+        for pipe in [stdout, stderr] {
+            drained.enter()
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty {
+                    handle.readabilityHandler = nil
+                    drained.leave()
                 } else {
-                    let label = currentFileLabel.map { "\($0): " } ?? ""
-                    continuation.resume(throwing: HandBrakeCompressorError.compressionFailed(label + combined.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    collector.append(chunk)
                 }
             }
+        }
+        let cancellation = CancellationFlag()
 
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                process.terminationHandler = { process in
+                    // Grandchildren may keep the pipes open; don't wait for them forever.
+                    _ = drained.wait(timeout: .now() + 2)
+                    let output = collector.text
+                    if cancellation.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else if process.terminationStatus == 0 {
+                        continuation.resume(returning: output)
+                    } else {
+                        let label = failureLabel.map { "\($0): " } ?? ""
+                        let tail = String(output.suffix(2_000)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        continuation.resume(throwing: HandBrakeCompressorError.compressionFailed(label + tail))
+                    }
+                }
+                do {
+                    try process.run()
+                } catch {
+                    for pipe in [stdout, stderr] {
+                        pipe.fileHandleForReading.readabilityHandler = nil
+                    }
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if cancellation.isCancelled {
+                    process.terminate()
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+            if process.isRunning {
+                process.terminate()
             }
         }
+    }
+}
+
+/// Thread-safe sink for process output; keeps a bounded transcript plus a short tail for
+/// progress parsing (a status line can be split across two reads).
+private final class ProcessOutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var transcript = Data()
+    private var recent = ""
+    private let transcriptLimit = 1 << 20
+    private let onRecentText: (@Sendable (String) -> Void)?
+
+    init(onRecentText: (@Sendable (String) -> Void)?) {
+        self.onRecentText = onRecentText
+    }
+
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.decode(transcript)
+    }
+
+    /// UTF-8 when valid; Latin-1 (never fails) for chunks split inside a multi-byte character.
+    private static func decode(_ data: Data) -> String {
+        String(bytes: data, encoding: .utf8) ?? String(bytes: data, encoding: .isoLatin1) ?? ""
+    }
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        transcript.append(chunk)
+        if transcript.count > transcriptLimit {
+            transcript.removeFirst(transcript.count - transcriptLimit)
+        }
+        recent = String((recent + Self.decode(chunk)).suffix(512))
+        let snapshot = recent
+        lock.unlock()
+        onRecentText?(snapshot)
+    }
+}
+
+private final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
     }
 }
 
@@ -141,20 +304,26 @@ final class HandBrakeCompressionSession: ObservableObject {
         isRunning = true
         progress = HandBrakeCompressionProgress(
             current: 0,
+            completed: 0,
             total: exports.count,
             filename: "",
+            fileFraction: 0,
+            eta: nil,
             isComplete: false,
             wasCancelled: false
         )
 
-        if exports.count >= 3 {
-            sleepAssertion.acquire(reason: "Compressing \(exports.count) drone exports")
-        }
+        // Even a single 4K export can take most of an hour; never let the Mac idle-sleep mid-encode.
+        sleepAssertion.acquire(reason: "Compressing \(exports.count) drone export\(exports.count == 1 ? "" : "s")")
 
+        let runID = UUID()
+        self.runID = runID
         task = Task {
             defer {
-                sleepAssertion.release()
-                isRunning = false
+                if self.runID == runID {
+                    sleepAssertion.release()
+                    isRunning = false
+                }
             }
 
             guard let cliURL = DroneToolPaths.resolveHandBrakeCLI(configuredPath: config.handBrakeCLIPath) else {
@@ -167,14 +336,15 @@ final class HandBrakeCompressionSession: ObservableObject {
             var issues: [OrganizeFailure] = []
 
             for (index, export) in exports.enumerated() {
-                if Task.isCancelled {
-                    progress?.wasCancelled = true
-                    progress?.isComplete = true
+                guard !Task.isCancelled else {
+                    finish(issues: issues, cancelled: true)
                     return
                 }
 
                 progress?.current = index + 1
                 progress?.filename = export.relativePath
+                progress?.fileFraction = 0
+                progress?.eta = nil
 
                 let inputURL = exportDir.appendingPathComponent(export.relativePath)
                 let outputRelative = DroneExportScanner.compressedRelativePath(for: export.relativePath, config: config)
@@ -185,16 +355,41 @@ final class HandBrakeCompressionSession: ObservableObject {
                         cliURL: cliURL,
                         inputURL: inputURL,
                         outputURL: outputURL,
-                        preset: preset
+                        preset: preset,
+                        onProgress: progressHandler(runID: runID, fileIndex: index + 1)
                     )
+                } catch is CancellationError {
+                    finish(issues: issues, cancelled: true)
+                    return
                 } catch {
                     issues.append(OrganizeFailure(filename: export.relativePath, message: error.localizedDescription))
                 }
+                progress?.completed = index + 1
             }
 
-            failures = issues
-            progress?.isComplete = true
+            finish(issues: issues, cancelled: false)
         }
+    }
+
+    private var runID: UUID?
+
+    /// HandBrake reports progress off the main actor; stale updates from a finished file or an
+    /// earlier run are dropped.
+    private func progressHandler(runID: UUID, fileIndex: Int) -> @Sendable (HandBrakeFileProgress) -> Void {
+        { [weak self] fileProgress in
+            Task { @MainActor in
+                guard let self, self.runID == runID, self.progress?.current == fileIndex else { return }
+                self.progress?.fileFraction = fileProgress.fraction
+                self.progress?.eta = fileProgress.eta
+            }
+        }
+    }
+
+    private func finish(issues: [OrganizeFailure], cancelled: Bool) {
+        failures = issues
+        progress?.wasCancelled = cancelled
+        progress?.isComplete = true
+        progress?.eta = nil
     }
 }
 

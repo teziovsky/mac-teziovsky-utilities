@@ -460,10 +460,19 @@ final class LocalPhotosService: ObservableObject {
     @Published private(set) var cancellationMessage: String?
     @Published var chunkSize = 100
 
-    private var operationTask: Task<Void, Never>?
-    private var operationID: UUID?
+    // Replacing originals with converted copies; the run lives in LocalMediaReplacementRun.swift,
+    // which is why these setters are internal.
+    @Published var isReplacing = false
+    @Published var replacementProgress = FileDateRepairProgress()
+    @Published var replacementSummary: LocalMediaReplacementSummary?
+    /// Builds the replacer for each run; tests swap in a fake Trash and verification.
+    var makeReplacer: () -> LocalMediaReplacer = { LocalMediaReplacer() }
 
-    var isRunning: Bool { isScanning || isConverting || isRepairing || isOrganizing }
+    // Internal so extensions in other files can run operations the same way.
+    var operationTask: Task<Void, Never>?
+    var operationID: UUID?
+
+    var isRunning: Bool { isScanning || isConverting || isRepairing || isOrganizing || isReplacing }
 
     @Published var workflowStep: LocalPhotosWorkflowStep = .convert
 
@@ -721,25 +730,13 @@ final class LocalPhotosService: ObservableObject {
             cancellationMessage = "Conversion cancelled. Completed conversions were kept."
         } else if isRepairing {
             cancellationMessage = "Repair cancelled. Files completed before cancellation remain repaired."
+        } else if isReplacing {
+            cancellationMessage = "Replacement cancelled. Originals replaced before cancellation stay in the Trash. "
+                + "Rescan the folder to refresh the previews."
         } else {
             cancellationMessage = "Organization cancelled. Files moved before cancellation remain organized."
         }
         operationTask?.cancel()
-    }
-
-    func clearProcessed() {
-        guard !isRunning, !repairedIDs.isEmpty else { return }
-        items.removeAll { repairedIDs.contains($0.id) }
-        repairedIDs = []
-        attemptedIDs = attemptedIDs.intersection(Set(items.map(\.id)))
-    }
-
-    func reset() {
-        cancel()
-        workflowStep = .convert
-        directory = nil
-        resetResults()
-        cancellationMessage = nil
     }
 
     private func resetResults() {
@@ -756,6 +753,8 @@ final class LocalPhotosService: ObservableObject {
         organizationProgress = FileDateRepairProgress()
         conversionSummary = nil
         organizationSummary = nil
+        replacementProgress = FileDateRepairProgress()
+        replacementSummary = nil
         repairedIDs = []
         attemptedIDs = []
         scannedFileCount = 0
@@ -763,6 +762,23 @@ final class LocalPhotosService: ObservableObject {
 
     private func organize(_ item: LocalMediaOrganizationItem) async throws {
         try await LocalMediaOrganizer.move(item)
+    }
+}
+
+extension LocalPhotosService {
+    func clearProcessed() {
+        guard !isRunning, !repairedIDs.isEmpty else { return }
+        items.removeAll { repairedIDs.contains($0.id) }
+        repairedIDs = []
+        attemptedIDs = attemptedIDs.intersection(Set(items.map(\.id)))
+    }
+
+    func reset() {
+        cancel()
+        workflowStep = .convert
+        directory = nil
+        resetResults()
+        cancellationMessage = nil
     }
 }
 
@@ -1073,6 +1089,34 @@ extension LocalPhotosService {
     }
 }
 
+/// Helpers for operations defined in other files (LocalMediaReplacementRun.swift).
+extension LocalPhotosService {
+    /// Takes every list from a fresh scan, as after converting.
+    func applyRefreshedScan(_ refreshed: FileDateScanResult) {
+        conversionItems = refreshed.conversionItems
+        items = refreshed.items
+        organizationItems = refreshed.organizationItems
+        organizationSkippedCount = refreshed.organizationSkippedCount
+        keptItems = refreshed.keptItems
+        replaceablePairs = refreshed.replaceablePairs
+        failures = refreshed.failures
+        scannedFileCount = refreshed.scannedFileCount
+    }
+
+    /// Drops pairs that a cancelled replacement already handled, when no rescan follows.
+    func removeReplaceablePairs(_ paths: Set<String>) {
+        replaceablePairs.removeAll { paths.contains($0.originalRelativePath) }
+    }
+
+    func appendFailure(_ failure: FileDateRepairFailure) {
+        failures.append(failure)
+    }
+
+    func clearCancellationMessage() {
+        cancellationMessage = nil
+    }
+}
+
 extension LocalPhotosService {
     func failureMessage(for itemID: String) -> String? {
         failures.last(where: { $0.relativePath == itemID })?.message
@@ -1084,6 +1128,7 @@ extension LocalPhotosService {
         if isConverting { return "Converting media" }
         if isRepairing { return "Repairing dates" }
         if isOrganizing { return "Organizing files" }
+        if isReplacing { return "Replacing originals" }
         return nil
     }
 }

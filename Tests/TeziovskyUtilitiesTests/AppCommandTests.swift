@@ -210,6 +210,38 @@ final class AppCommandDecisionTests: XCTestCase {
         XCTAssertNil(state.localPhotosService.directory, "Leaving resets the mode")
     }
 
+    func testLocalPhotosBlocksHomeBackAndEscapeWhileReplacingOriginals() async throws {
+        let original = root.appendingPathComponent("Mia.mp4")
+        try Data([1, 2, 3]).write(to: original)
+        try Data([4, 5, 6]).write(to: root.appendingPathComponent("Mia-converted.mp4"))
+        let marker = Array("Mia-converted.mp4".utf8)
+        let markerName = "com.teziovsky.utilities.converted-media"
+        XCTAssertEqual(setxattr(original.path, markerName, marker, marker.count, 0, 0), 0)
+        let state = makeState()
+        state.route = .localPhotos
+        let service = state.localPhotosService
+        service.makeReplacer = {
+            LocalMediaReplacer(trash: { _ in XCTFail("Nothing may be trashed") }, verify: { _ in
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            })
+        }
+        service.scan(directory: root)
+        try await waitUntilIdle(service)
+        XCTAssertEqual(service.replaceablePairs.count, 1)
+
+        service.replaceOriginals()
+        for command in [AppCommand.home, .back, .escape] {
+            assertNotice(state.decision(for: command), contains: "Replacing originals is in progress")
+        }
+        state.run(.home)
+        XCTAssertEqual(state.route, .localPhotos, "Blocked home must not leave the mode")
+
+        service.cancel()
+        try await waitUntilIdle(service)
+        XCTAssertEqual(service.replacementSummary?.cancelled, 1)
+        XCTAssertEqual(state.decision(for: .home), .perform)
+    }
+
     func testBackWalksTheLocalPhotosStepsAndProtectsResultsAtTheFirstStep() async throws {
         try makeJPEG("a.jpg")
         let state = makeState()

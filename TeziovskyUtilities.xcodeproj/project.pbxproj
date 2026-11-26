@@ -80,6 +80,8 @@
 		A00300000000000000000099 /* HEVCRetagger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00300000000000000000099 /* HEVCRetagger.swift */; };
 		A003000000000000000000A0 /* LocalMediaRemuxVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */; };
 		A00200000000000000000E60 /* LocalMediaReplacer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000E60 /* LocalMediaReplacer.swift */; };
+		A00200000000000000000E61 /* LocalMediaReplacementRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000E61 /* LocalMediaReplacementRun.swift */; };
+		A00200000000000000000E62 /* LocalMediaReplacementSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00200000000000000000E62 /* LocalMediaReplacementSection.swift */; };
 		0FF1B5869E37421096AD477E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CCEC6AF34D2A457CA48F3ED4 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -161,6 +163,8 @@
 		B00300000000000000000099 /* HEVCRetagger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCRetagger.swift; sourceTree = "<group>"; };
 		B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaRemuxVerifier.swift; sourceTree = "<group>"; };
 		B00200000000000000000E60 /* LocalMediaReplacer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaReplacer.swift; sourceTree = "<group>"; };
+		B00200000000000000000E61 /* LocalMediaReplacementRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaReplacementRun.swift; sourceTree = "<group>"; };
+		B00200000000000000000E62 /* LocalMediaReplacementSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaReplacementSection.swift; sourceTree = "<group>"; };
 		334455667788990011223344 /* TeziovskyUtilities.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TeziovskyUtilities.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -236,6 +240,7 @@
 				B00300000000000000000099 /* HEVCRetagger.swift */,
 				B003000000000000000000A0 /* LocalMediaRemuxVerifier.swift */,
 				B00200000000000000000E60 /* LocalMediaReplacer.swift */,
+				B00200000000000000000E61 /* LocalMediaReplacementRun.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -286,6 +291,7 @@
 				B0010000000000000000F0A5 /* ExternalDriveSettingsTab.swift */,
 				B00200000000000000000003 /* FileDateRepairModeView.swift */,
 				B00200000000000000000C01 /* LocalMediaKeptSection.swift */,
+				B00200000000000000000E62 /* LocalMediaReplacementSection.swift */,
 				7B69DA170D5944609FD87A0A /* LocalMediaListComponents.swift */,
 				B40000000000000000000001 /* LocalMediaTreeList.swift */,
 			);
@@ -457,6 +463,8 @@
 				A00300000000000000000099 /* HEVCRetagger.swift in Sources */,
 				A003000000000000000000A0 /* LocalMediaRemuxVerifier.swift in Sources */,
 				A00200000000000000000E60 /* LocalMediaReplacer.swift in Sources */,
+				A00200000000000000000E61 /* LocalMediaReplacementRun.swift in Sources */,
+				A00200000000000000000E62 /* LocalMediaReplacementSection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

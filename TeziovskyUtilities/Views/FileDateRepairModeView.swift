@@ -45,7 +45,8 @@ struct LocalPhotosModeView: View {
             header
                 .id(Self.topID)
             folderCard
-            if service.isRunning {
+            // On the Convert step, replacing shows its progress and Cancel in its own section.
+            if service.isRunning, !(service.isReplacing && service.workflowStep == .convert) {
                 progressCard
             }
             if service.directory != nil, !service.isScanning {
@@ -128,6 +129,8 @@ struct LocalPhotosModeView: View {
             activeProgress = service.conversionProgress
         } else if service.isOrganizing {
             activeProgress = service.organizationProgress
+        } else if service.isReplacing {
+            activeProgress = service.replacementProgress
         } else {
             activeProgress = service.progress
         }
@@ -160,6 +163,7 @@ struct LocalPhotosModeView: View {
         if service.isScanning { return "Scanning media" }
         if service.isConverting { return "Converting media" }
         if service.isRepairing { return "Repairing dates" }
+        if service.isReplacing { return "Replacing originals" }
         return "Organizing files"
     }
 
@@ -424,6 +428,10 @@ private struct LocalMediaConversionPreviewCard: View {
                             LocalMediaConversionRow(item: item)
                         }
                     }
+                }
+                if !service.replaceablePairs.isEmpty || service.replacementSummary != nil {
+                    Divider()
+                    LocalMediaReplacementSection(service: service, filter: filter)
                 }
             }
         }

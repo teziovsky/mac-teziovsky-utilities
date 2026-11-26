@@ -57,3 +57,16 @@ struct LocalMediaReplaceablePair: Identifiable, Sendable, Equatable {
         }.sorted { $0.originalRelativePath.localizedStandardCompare($1.originalRelativePath) == .orderedAscending }
     }
 }
+
+/// What a "Replace Originals" run did. A pair cancelled mid-check, or never tried because the
+/// run was cancelled, counts as cancelled, not failed.
+struct LocalMediaReplacementSummary: Sendable, Equatable {
+    var replaced = 0
+    /// The original is in the Trash, but the copy kept its own name.
+    var keptCopyName = 0
+    var failed = 0
+    var cancelled = 0
+    var total = 0
+    /// The pairs that were not fully replaced (failed or kept the copy's name), with the reason.
+    var issues: [FileDateRepairFailure] = []
+}

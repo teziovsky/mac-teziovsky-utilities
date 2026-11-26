@@ -21,9 +21,14 @@ enum LocalMediaRemuxVerifier {
         }
         let outputDuration = try await output.load(.duration).seconds
         let sourceDuration = try await original.load(.duration).seconds
-        guard abs(outputDuration - sourceDuration) <= max(0.5, sourceDuration * 0.01) else {
+        guard durationsMatch(outputDuration, source: sourceDuration) else {
             throw LocalMediaConversionError.verificationFailed
         }
+    }
+
+    /// The conversion's tolerance: half a second or 1% of the source, whichever is larger.
+    static func durationsMatch(_ output: Double, source: Double) -> Bool {
+        abs(output - source) <= max(0.5, source * 0.01)
     }
 
     static func videoSubtype(of asset: AVAsset) async throws -> FourCharCode? {

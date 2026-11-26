@@ -150,3 +150,17 @@ final class LocalMediaReplacementTests: XCTestCase {
         XCTAssertTrue(pairs.isEmpty)
     }
 }
+
+extension LocalMediaReplacementTests {
+    func testPairsSharingACopyAreNotReplaceable() async throws {
+        _ = try write("A.mp4", marker: "C.mp4")
+        _ = try write("B.mp4", marker: "C.mp4")
+        _ = try write("C.mp4")
+        _ = try write("X.mp4", marker: "Y.mp4")
+        _ = try write("Y.mp4")
+
+        let pairs = try await scan(["mp4"]).replaceablePairs
+
+        XCTAssertEqual(pairs.map(\.originalRelativePath), ["X.mp4"])
+    }
+}

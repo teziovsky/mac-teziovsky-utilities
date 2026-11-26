@@ -335,7 +335,7 @@ enum LocalMediaConverter {
         }
     }
 
-    static func markConverted(_ sourceURL: URL, destination: URL) {
+    private static func markConverted(_ sourceURL: URL, destination: URL) {
         let value = Array(destination.lastPathComponent.utf8)
         sourceURL.path.withCString { path in
             conversionMarker.withCString { name in

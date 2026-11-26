@@ -46,11 +46,14 @@ struct LocalMediaReplaceablePair: Identifiable, Sendable, Equatable {
 
     /// Sorted pairs without chains: a file that is both a copy and an original (A to B to C,
     /// or A and B pointing at each other) takes both of its links out, so it is never replaced.
+    /// A copy claimed by several originals (A to C and B to C) takes all of them out too.
     static func sorted(_ pairs: [LocalMediaReplaceablePair]) -> [LocalMediaReplaceablePair] {
         let originals = Set(pairs.map(\.originalRelativePath))
-        let copies = Set(pairs.map(\.copyRelativePath))
+        let copyCounts = Dictionary(pairs.map { ($0.copyRelativePath, 1) }, uniquingKeysWith: +)
         return pairs.filter {
-            !copies.contains($0.originalRelativePath) && !originals.contains($0.copyRelativePath)
+            copyCounts[$0.originalRelativePath] == nil
+                && !originals.contains($0.copyRelativePath)
+                && copyCounts[$0.copyRelativePath] == 1
         }.sorted { $0.originalRelativePath.localizedStandardCompare($1.originalRelativePath) == .orderedAscending }
     }
 }

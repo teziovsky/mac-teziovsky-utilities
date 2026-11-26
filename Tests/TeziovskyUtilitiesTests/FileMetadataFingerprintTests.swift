@@ -23,6 +23,16 @@ final class FileMetadataFingerprintTests: XCTestCase {
         XCTAssertEqual(result, 0, "setxattr failed: errno \(errno)")
     }
 
+    /// Exact nanosecond birth time; going through `Date` would lose precision.
+    private func setBirthTime(_ nanoseconds: Int64, on url: URL) throws {
+        var list = attrlist()
+        list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        list.commonattr = attrgroup_t(ATTR_CMN_CRTIME)
+        var spec = timespec(tv_sec: Int(nanoseconds / 1_000_000_000), tv_nsec: Int(nanoseconds % 1_000_000_000))
+        let result = setattrlist(url.path, &list, &spec, MemoryLayout<timespec>.size, UInt32(FSOPT_NOFOLLOW))
+        XCTAssertEqual(result, 0, "setattrlist failed: errno \(errno)")
+    }
+
     private func makeSource(_ contents: String = "hello world") throws -> URL {
         let url = root.appendingPathComponent("source.dat")
         try Data(contents.utf8).write(to: url)
@@ -37,8 +47,7 @@ final class FileMetadataFingerprintTests: XCTestCase {
         // copyfile does not carry the birth date over and rewrites the quarantine value;
         // the mover has to restore both, so the fixture does the same.
         let sourceFingerprint = try FileMetadataFingerprint.read(source, includeContent: false)
-        try FileManager.default.setAttributes([.creationDate: sourceFingerprint.creationDate],
-                                              ofItemAtPath: copy.path)
+        try setBirthTime(sourceFingerprint.creationNanoseconds, on: copy)
         try setXattr("com.apple.quarantine", "0081;00000000;Safari;", on: copy)
         return copy
     }
@@ -95,28 +104,60 @@ final class FileMetadataFingerprintTests: XCTestCase {
         XCTAssertEqual(result.first?.before, "missing")
     }
 
-    func testDatesWithinResolutionAreEqual() throws {
-        let source = try makeSource()
-        let base = try FileMetadataFingerprint.read(source, includeContent: true)
-        let shifted = FileMetadataFingerprint(
-            size: base.size,
-            creationDate: base.creationDate,
-            modificationDate: Date(timeIntervalSinceReferenceDate:
-                (base.modificationDate.timeIntervalSinceReferenceDate / 0.01).rounded(.down) * 0.01 + 0.004),
-            flags: base.flags,
-            xattrDigests: base.xattrDigests,
-            contentDigest: base.contentDigest
-        )
-        let aligned = FileMetadataFingerprint(
-            size: base.size, creationDate: base.creationDate,
-            modificationDate: Date(timeIntervalSinceReferenceDate:
-                (base.modificationDate.timeIntervalSinceReferenceDate / 0.01).rounded(.down) * 0.01),
-            flags: base.flags, xattrDigests: base.xattrDigests, contentDigest: base.contentDigest
-        )
-        XCTAssertEqual(FileMetadataFingerprint.differences(
-            source: aligned, destination: shifted, timeResolution: 0.01), [])
-        XCTAssertEqual(FileMetadataFingerprint.differences(
-            source: aligned, destination: shifted, timeResolution: 0.000_001).map(\.field), ["modified"])
+    private func fingerprint(
+        size: UInt64 = 10, created: Int64 = 1_700_000_000_000_000_000,
+        modified: Int64 = 1_700_000_000_000_000_000, flags: UInt32 = 0,
+        content: Data? = Data([1])
+    ) -> FileMetadataFingerprint {
+        FileMetadataFingerprint(size: size, creationNanoseconds: created, modificationNanoseconds: modified,
+                                flags: flags, xattrDigests: [:], contentDigest: content)
+    }
+
+    private func fields(_ source: FileMetadataFingerprint, _ destination: FileMetadataFingerprint,
+                        resolution: TimeInterval = 0.000_001) -> [String] {
+        FileMetadataFingerprint.differences(source: source, destination: destination, timeResolution: resolution)
+            .map(\.field)
+    }
+
+    func testDatesWithinResolutionAreEqual() {
+        let base: Int64 = 1_700_000_000_000_000_000
+        let source = fingerprint(created: base, modified: base)
+        let near = fingerprint(created: base + 4_000_000, modified: base + 4_000_000)
+        XCTAssertEqual(fields(source, near, resolution: 0.01), [])
+        XCTAssertEqual(fields(source, near, resolution: 0.000_001), ["created", "modified"])
+    }
+
+    func testDatesStraddlingABucketAreDifferent() {
+        let base: Int64 = 1_700_000_000_000_000_000
+        let source = fingerprint(modified: base + 9_000_000)
+        let next = fingerprint(modified: base + 11_000_000)
+        XCTAssertEqual(fields(source, next, resolution: 0.01), ["modified"])
+    }
+
+    func testMicrosecondTruncatedDestinationIsEqualAtMicrosecondResolution() {
+        let source = fingerprint(modified: 1_700_000_000_123_456_789)
+        let truncated = fingerprint(modified: 1_700_000_000_123_456_000)
+        XCTAssertEqual(fields(source, truncated), [])
+    }
+
+    func testSizeAndCreatedDifferencesAreReported() {
+        XCTAssertEqual(fields(fingerprint(size: 1), fingerprint(size: 2)), ["size"])
+        XCTAssertEqual(fields(fingerprint(created: 1_000_000_000), fingerprint(created: 5_000_000_000)),
+                       ["created"])
+    }
+
+    func testFlagsDifferenceIsReportedButCompressedIsIgnored() {
+        let compressed = UInt32(UF_COMPRESSED)
+        XCTAssertEqual(fields(fingerprint(flags: 0), fingerprint(flags: compressed)), [])
+        XCTAssertEqual(fields(fingerprint(flags: 0), fingerprint(flags: UInt32(UF_HIDDEN))), ["flags"])
+        XCTAssertEqual(fields(fingerprint(flags: compressed), fingerprint(flags: compressed | UInt32(UF_HIDDEN))),
+                       ["flags"])
+    }
+
+    func testContentDigestOnOneSideOnlyIsReported() {
+        XCTAssertEqual(fields(fingerprint(content: Data([1])), fingerprint(content: nil)), ["content"])
+        XCTAssertEqual(fields(fingerprint(content: nil), fingerprint(content: Data([1]))), ["content"])
+        XCTAssertEqual(fields(fingerprint(content: nil), fingerprint(content: nil)), [])
     }
 
     func testContentDifferenceIsReported() throws {
@@ -130,8 +171,24 @@ final class FileMetadataFingerprintTests: XCTestCase {
         XCTAssertEqual(result.map(\.field), ["content"])
     }
 
-    func testTimeResolutionByVolume() {
-        let resolution = FileMetadataFingerprint.timeResolution(forVolumeOf: root)
-        XCTAssertTrue([0.000_001, 0.01, 1].contains(resolution))
+    func testReadRejectsSymlinks() throws {
+        let source = try makeSource()
+        let link = root.appendingPathComponent("link.dat")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+        XCTAssertThrowsError(try FileMetadataFingerprint.read(link, includeContent: true))
+    }
+
+    func testTimeResolutionByFileSystemType() {
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forFileSystemType: "exfat"), 0.01)
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forFileSystemType: "apfs"), 0.000_001)
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forFileSystemType: "hfs"), 1)
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forFileSystemType: "msdos"), 1)
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forFileSystemType: "weird"), 1)
+    }
+
+    func testTimeResolutionForTemporaryDirectoryIsAPFS() {
+        XCTAssertEqual(FileMetadataFingerprint.timeResolution(forVolumeOf: root), 0.000_001)
+        XCTAssertNil(FileMetadataFingerprint.timeResolution(
+            forVolumeOf: root.appendingPathComponent("does-not-exist")))
     }
 }

@@ -13,14 +13,18 @@ struct MetadataDifference: Equatable, Sendable {
 /// extended attributes (by SHA-256) and, optionally, the content (by SHA-256).
 struct FileMetadataFingerprint: Equatable, Sendable {
     let size: UInt64
-    let creationDate: Date
-    let modificationDate: Date
+    /// Nanoseconds since 1970, kept as integers so bucketing at a volume's resolution is exact.
+    let creationNanoseconds: Int64
+    let modificationNanoseconds: Int64
     let flags: UInt32
     let xattrDigests: [String: Data]
     let contentDigest: Data?
 
     /// Added by macOS on its own; a destination-only copy of it is not a difference.
     static let provenanceXattr = "com.apple.provenance"
+
+    var creationDate: Date { Self.date(nanoseconds: creationNanoseconds) }
+    var modificationDate: Date { Self.date(nanoseconds: modificationNanoseconds) }
 
     private static let chunkSize = 4 * 1024 * 1024
 
@@ -29,10 +33,12 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     static func read(_ url: URL, includeContent: Bool) throws -> FileMetadataFingerprint {
         var info = stat()
         guard lstat(url.path, &info) == 0 else { throw POSIXError(currentErrno()) }
+        // A symlink would make size/flags describe the link while content describes its target.
+        guard info.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
         return FileMetadataFingerprint(
             size: UInt64(info.st_size),
-            creationDate: date(info.st_birthtimespec),
-            modificationDate: date(info.st_mtimespec),
+            creationNanoseconds: nanoseconds(info.st_birthtimespec),
+            modificationNanoseconds: nanoseconds(info.st_mtimespec),
             flags: info.st_flags,
             xattrDigests: try xattrDigests(of: url),
             contentDigest: includeContent ? try contentDigest(of: url) : nil
@@ -43,13 +49,16 @@ struct FileMetadataFingerprint: Equatable, Sendable {
         POSIXErrorCode(rawValue: errno) ?? .EIO
     }
 
-    private static func date(_ spec: timespec) -> Date {
-        Date(timeIntervalSince1970: TimeInterval(spec.tv_sec) + TimeInterval(spec.tv_nsec) / 1_000_000_000)
+    private static func nanoseconds(_ spec: timespec) -> Int64 {
+        Int64(spec.tv_sec) * 1_000_000_000 + Int64(spec.tv_nsec)
+    }
+
+    private static func date(nanoseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(nanoseconds) / 1_000_000_000)
     }
 
     private static func xattrDigests(of url: URL) throws -> [String: Data] {
         let path = url.path
-        var names: [String] = []
         // The list can change between the size query and the read; retry on ERANGE.
         for _ in 0..<5 {
             let length = listxattr(path, nil, 0, XATTR_NOFOLLOW)
@@ -61,17 +70,16 @@ struct FileMetadataFingerprint: Equatable, Sendable {
                 if errno == ERANGE { continue }
                 throw POSIXError(currentErrno())
             }
-            names = buffer[0..<read].split(separator: 0).map { name in
+            let names = buffer[0..<read].split(separator: 0).map { name in
                 String(cString: Array(name) + [0])
             }
-            break
+            var digests: [String: Data] = [:]
+            for name in names {
+                digests[name] = Data(SHA256.hash(data: try xattrValue(named: name, at: path)))
+            }
+            return digests
         }
-
-        var digests: [String: Data] = [:]
-        for name in names {
-            digests[name] = Data(SHA256.hash(data: try xattrValue(named: name, at: path)))
-        }
-        return digests
+        throw POSIXError(.EAGAIN)
     }
 
     private static func xattrValue(named name: String, at path: String) throws -> Data {
@@ -113,11 +121,12 @@ struct FileMetadataFingerprint: Equatable, Sendable {
         if source.size != destination.size {
             result.append(MetadataDifference(field: "size", before: "\(source.size)", after: "\(destination.size)"))
         }
-        if !sameInstant(source.creationDate, destination.creationDate, resolution: timeResolution) {
+        if !sameInstant(source.creationNanoseconds, destination.creationNanoseconds, resolution: timeResolution) {
             result.append(MetadataDifference(
                 field: "created", before: describe(source.creationDate), after: describe(destination.creationDate)))
         }
-        if !sameInstant(source.modificationDate, destination.modificationDate, resolution: timeResolution) {
+        if !sameInstant(source.modificationNanoseconds, destination.modificationNanoseconds,
+                        resolution: timeResolution) {
             result.append(MetadataDifference(
                 field: "modified", before: describe(source.modificationDate),
                 after: describe(destination.modificationDate)))
@@ -142,17 +151,23 @@ struct FileMetadataFingerprint: Equatable, Sendable {
                 field: "xattr \(name)", before: "missing", after: describe(destination.xattrDigests[name])))
         }
 
-        if let before = source.contentDigest, let after = destination.contentDigest, before != after {
-            result.append(MetadataDifference(field: "content", before: describe(before), after: describe(after)))
+        // A digest on only one side is a difference too: nothing proves the contents match.
+        if source.contentDigest != destination.contentDigest {
+            result.append(MetadataDifference(
+                field: "content", before: describe(source.contentDigest), after: describe(destination.contentDigest)))
         }
         return result
     }
 
-    private static func sameInstant(_ lhs: Date, _ rhs: Date, resolution: TimeInterval) -> Bool {
-        guard resolution > 0 else { return lhs == rhs }
-        let left = (lhs.timeIntervalSince1970 / resolution).rounded(.down)
-        let right = (rhs.timeIntervalSince1970 / resolution).rounded(.down)
-        return left == right
+    private static func sameInstant(_ lhs: Int64, _ rhs: Int64, resolution: TimeInterval) -> Bool {
+        let bucket = Int64((resolution * 1_000_000_000).rounded())
+        guard bucket > 1 else { return lhs == rhs }
+        return floorDivide(lhs, bucket) == floorDivide(rhs, bucket)
+    }
+
+    private static func floorDivide(_ value: Int64, _ divisor: Int64) -> Int64 {
+        let quotient = value / divisor
+        return value % divisor < 0 ? quotient - 1 : quotient
     }
 
     private static func describe(_ digest: Data?) -> String {
@@ -161,8 +176,9 @@ struct FileMetadataFingerprint: Equatable, Sendable {
     }
 
     private static func describe(_ date: Date) -> String {
-        let whole = date.timeIntervalSince1970.rounded(.down)
-        let micros = Int(((date.timeIntervalSince1970 - whole) * 1_000_000).rounded(.down))
+        let total = date.timeIntervalSince1970
+        let whole = total.rounded(.down)
+        let micros = Int(((total - whole) * 1_000_000).rounded(.down))
         let seconds = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: whole))
         return seconds.replacingOccurrences(of: "Z", with: String(format: ".%06dZ", micros))
     }
@@ -173,16 +189,21 @@ struct FileMetadataFingerprint: Equatable, Sendable {
 
     // MARK: Volume time resolution
 
-    /// Timestamp granularity the volume holding `url` can store.
-    static func timeResolution(forVolumeOf url: URL) -> TimeInterval {
+    /// Timestamp granularity the volume holding `url` can store; nil when it cannot be determined.
+    static func timeResolution(forVolumeOf url: URL) -> TimeInterval? {
         var info = statfs()
-        guard statfs(url.path, &info) == 0 else { return 1 }
+        guard statfs(url.path, &info) == 0 else { return nil }
         let type = withUnsafePointer(to: &info.f_fstypename) { pointer in
             pointer.withMemoryRebound(to: CChar.self, capacity: Int(MFSTYPENAMELEN)) { String(cString: $0) }
         }
+        return timeResolution(forFileSystemType: type)
+    }
+
+    /// HFS+ stores whole seconds; anything unknown is treated as the coarsest 1 s.
+    static func timeResolution(forFileSystemType type: String) -> TimeInterval {
         switch type {
         case "exfat": return 0.01
-        case "apfs", "hfs": return 0.000_001
+        case "apfs": return 0.000_001
         default: return 1
         }
     }

@@ -349,7 +349,8 @@ enum LocalMediaOrganizer {
             isVideo: item.isVideo
         )
         // Re-plan on the fresh dates: the move still applies if it lands in the same folder for
-        // the same deciding date (an embedded date can decide, not only the oldest one).
+        // the same deciding date (an embedded date can decide, not only the oldest one). A Live
+        // Photo motion file follows its still's folder, so only its deciding date is compared.
         let replanned = LocalMediaOrganizationPlanner.plan(
             fileURL: item.sourceURL,
             relativePath: item.sourceRelativePath,
@@ -359,7 +360,8 @@ enum LocalMediaOrganizer {
             groupsWithPhotos: item.groupsWithPhotos
         )
         guard case .move(let fresh) = replanned,
-              fresh.destinationURL.deletingLastPathComponent().standardizedFileURL.path
+              item.groupsWithPhotos
+              || fresh.destinationURL.deletingLastPathComponent().standardizedFileURL.path
               == item.destinationURL.deletingLastPathComponent().standardizedFileURL.path,
               abs(fresh.proposedDate.timeIntervalSince(item.proposedDate)) <=
               FileDateRepairPlanner.timestampTolerance else {

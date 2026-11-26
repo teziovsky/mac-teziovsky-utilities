@@ -57,7 +57,79 @@ final class LocalMediaOrganizerMoveTests: XCTestCase {
         }
     }
 
+    /// A Live Photo motion file follows its still's folder, which can differ from where its own
+    /// dates would put it; the move must still apply while its date is unchanged.
+    func testLivePhotoMotionFollowsItsStillIntoAnotherFolder() async throws {
+        let still = try makeJPEG("Inbox/IMG_0001.jpg", exifDate: "2020:08:01 12:00:00", fileDate: date(2024, 1, 1))
+        let motion = try await makeMotion("Inbox/IMG_0001.MOV", captured: date(2021, 5, 1))
+        let items = try await plannedLivePhoto(still: still, motion: motion)
+        let motionItem = try XCTUnwrap(items.first { $0.isVideo })
+        XCTAssertEqual(motionItem.destinationRelativePath, "Inbox/2020/IMG_0001.MOV")
+
+        for item in items {
+            try await LocalMediaOrganizer.move(item)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Inbox/2020/IMG_0001.MOV").path))
+    }
+
+    func testLivePhotoMotionMoveIsRejectedWhenItsDateChanged() async throws {
+        let still = try makeJPEG("Inbox/IMG_0001.jpg", exifDate: "2020:08:01 12:00:00", fileDate: date(2024, 1, 1))
+        let motion = try await makeMotion("Inbox/IMG_0001.MOV", captured: date(2021, 5, 1))
+        let items = try await plannedLivePhoto(still: still, motion: motion)
+        let motionItem = try XCTUnwrap(items.first { $0.isVideo })
+        try FileDatePreservation.applyFileDates(to: motion, created: date(2019, 6, 1), modified: date(2019, 6, 1))
+
+        do {
+            try await LocalMediaOrganizer.move(motionItem)
+            XCTFail("Expected the move to reject changed dates")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Dates changed"), error.localizedDescription)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: motion.path))
+        }
+    }
+
     // MARK: - Helpers
+
+    private func makeMotion(_ relativePath: String, captured: Date) async throws -> URL {
+        let url = root.appendingPathComponent(relativePath)
+        try await TestVideoFactory.makeVideo(
+            at: url,
+            seconds: 1,
+            metadata: [TestVideoFactory.creationDateItem(captured)]
+        )
+        try FileDatePreservation.applyFileDates(to: url, created: date(2024, 1, 1), modified: date(2024, 1, 1))
+        return url
+    }
+
+    /// Plans both halves of a Live Photo the way the scanner does, motion file grouped with
+    /// its still.
+    private func plannedLivePhoto(still: URL, motion: URL) async throws -> [LocalMediaOrganizationItem] {
+        var candidates: [LocalMediaOrganizationItem] = []
+        for (url, isVideo) in [(still, false), (motion, true)] {
+            let relativePath = String(url.path.dropFirst(root.path.count + 1))
+            let evidence = try await MediaMetadataReader.readDateEvidence(url: url, isVideo: isVideo)
+            let outcome = LocalMediaOrganizationPlanner.plan(
+                fileURL: url,
+                relativePath: relativePath,
+                rootDirectory: root,
+                evidence: evidence,
+                isVideo: isVideo,
+                groupsWithPhotos: isVideo
+            )
+            guard case .move(let item) = outcome else {
+                XCTFail("Expected a planned move, got \(outcome) from \(evidence)")
+                throw CocoaError(.fileReadUnknown)
+            }
+            candidates.append(item)
+        }
+        let paths = candidates.map(\.sourceRelativePath)
+        return LocalMediaOrganizationPlanner.resolveCollisions(
+            candidates,
+            rootDirectory: root,
+            livePhotoCompanions: LocalMediaOrganizationPlanner.livePhotoCompanions(in: paths)
+        )
+    }
 
     private func plannedMove(_ url: URL, relativePath: String) async throws -> LocalMediaOrganizationItem {
         let evidence = try await MediaMetadataReader.readDateEvidence(url: url, isVideo: false)

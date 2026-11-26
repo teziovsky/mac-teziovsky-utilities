@@ -462,6 +462,7 @@ private struct LocalMediaConversionRow: View {
             Image(systemName: iconName)
                 .foregroundStyle(.blue)
                 .frame(width: 20)
+                .localMediaRowAnchor()
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.sourceRelativePath)
                     .font(.callout.monospaced())
@@ -668,6 +669,7 @@ private struct LocalMediaOrganizationRow: View {
             Image(systemName: item.isVideo ? "film.fill" : "photo.fill")
                 .foregroundStyle(item.isVideo ? .purple : .blue)
                 .frame(width: 20)
+                .localMediaRowAnchor()
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.sourceRelativePath)
@@ -724,6 +726,7 @@ private struct FileDateRepairRow: View {
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .frame(width: 10)
+                        .localMediaRowAnchor()
                     statusIcon
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: 5) {

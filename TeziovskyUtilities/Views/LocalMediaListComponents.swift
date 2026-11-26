@@ -4,6 +4,26 @@ import SwiftUI
 /// Rows beyond this are behind "Show all", so folders with thousands of files stay responsive.
 let localMediaListRowLimit = 300
 
+extension VerticalAlignment {
+    private enum LocalMediaRowAnchor: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat {
+            context[VerticalAlignment.center]
+        }
+    }
+
+    /// The line a file row's include checkbox lines up with. Rows mark their leading icon
+    /// (the disclosure chevron or the file-type icon) with `localMediaRowAnchor()`, so the
+    /// checkbox stays on the first line even when a row is expanded or wraps.
+    static let localMediaRowAnchor = VerticalAlignment(LocalMediaRowAnchor.self)
+}
+
+extension View {
+    /// Marks this view's vertical center as the line the row's include checkbox centers on.
+    func localMediaRowAnchor() -> some View {
+        alignmentGuide(.localMediaRowAnchor) { $0[VerticalAlignment.center] }
+    }
+}
+
 /// A reviewable file row: an include checkbox (unticked files are left unchanged by that
 /// step), dimming for excluded files and "Reveal in Finder" in the context menu.
 struct LocalMediaSelectableRow<Content: View>: View {
@@ -18,7 +38,7 @@ struct LocalMediaSelectableRow<Content: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .localMediaRowAnchor, spacing: 8) {
             Toggle(
                 "Include \(path)",
                 isOn: Binding(
@@ -28,7 +48,7 @@ struct LocalMediaSelectableRow<Content: View>: View {
             )
             .toggleStyle(.checkbox)
             .labelsHidden()
-            .padding(.top, 10)
+            .localMediaRowAnchor()
             .disabled(service.isRunning)
             .help(
                 isIncluded ? "Included — untick to leave this file unchanged" : "Excluded — this file stays unchanged"
